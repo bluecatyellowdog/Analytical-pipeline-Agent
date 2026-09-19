@@ -1,0 +1,28 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Data: raw and derived data never goes into git (public showcase data is fetched by script)
+data/*
+!data/raw/
+data/raw/*
+!data/raw/.gitkeep
+*.duckdb
+*.duckdb.wal
+runs/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

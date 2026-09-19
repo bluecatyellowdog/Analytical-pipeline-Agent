@@ -1,0 +1,58 @@
+# Example context brief (Stage 0).
+# Every checkable statement here is treated as a hypothesis and verified in Stage 1.
+description: >
+  One row per consumer loan application at a Danish retail bank, exported from the
+  core system. Amounts are in DKK. The export covers 2019 through 2024.
+goal: >
+  Understand which applicant characteristics are associated with default within
+  12 months, and whether the relationship differs for young applicants.
+
+target: default_12m
+unit_of_observation: one loan application
+id_column: kunde_id
+
+column_notes:
+  - name: kunde_id
+    description: Customer number from the core system. Has leading zeros.
+  - name: alder
+    description: Applicant age at application
+    unit: years
+  - name: beloeb
+    description: Applied loan amount
+    unit: DKK
+    known_issues: Exported with a decimal comma; 999 was used for "unknown" before 2021.
+  - name: default_12m
+    description: 1 if the loan defaulted within 12 months of payout
+    allowed_values: ["0", "1"]
+
+known_issues:
+  - Applications before 2021 were migrated from an older system and have more missing values.
+  - The email column is only populated for customers with online banking.
+
+focus_areas:
+  - Applicants under 25
+  - Loans above 200,000 DKK
+
+excluded_variables:
+  - koen        # legally sensitive: must not be used as a feature
+  - postnummer  # proxy for protected characteristics
+
+claims:
+  - kind: column_unique
+    column: kunde_id
+    text: cust_id is unique
+  - kind: binary_column
+    column: default_12m
+    text: the target is binary
+  - kind: date_range
+    column: dato
+    params:
+      min: "2019-01-01"
+      max: "2024-12-31"
+    text: covers 2019-2024
+  - kind: value_range
+    column: alder
+    params:
+      min: 18
+      max: 120
+    text: applicants are adults

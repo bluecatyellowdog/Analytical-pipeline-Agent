@@ -1,0 +1,42 @@
+[project]
+name = "agentic-ds-pipeline"
+version = "0.1.0"
+description = "Auditable agentic data science pipeline for regulated tabular data"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Phase 0-1 only. Add later-phase dependencies (langgraph, presidio, lightgbm, shap, ...) when needed.
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "duckdb>=1.0",
+    "pandas>=2.2",
+    "pandera>=0.20",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: tests that touch DuckDB or the filesystem",
+    "e2e: end-to-end runs (LLM is always mocked in CI)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
