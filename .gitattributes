@@ -1,0 +1,9 @@
+# Source is LF in the repository regardless of the checkout platform.
+* text=auto eol=lf
+
+# Fixtures are byte-exact by design: one of them deliberately uses CRLF, another
+# is cp1252, another carries a BOM. Git must not normalise any of it.
+tests/fixtures/** -text
+*.parquet binary
+*.xlsx binary
+*.pdf binary
