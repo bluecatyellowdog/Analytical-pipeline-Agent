@@ -86,7 +86,7 @@ def detect_encoding(head: bytes) -> tuple[str, list[str], list[Flag]]:
         head.decode("utf-8")
     except UnicodeDecodeError as error:
         notes.append(
-            f"Not valid UTF-8 (byte {error.start}: {head[error.start:error.start + 1]!r}); "
+            f"Not valid UTF-8 (byte {error.start}: {head[error.start : error.start + 1]!r}); "
             f"falling back to cp1252."
         )
         flags.append(

@@ -73,7 +73,7 @@ def latin1_aeoeaa() -> None:
 def quoted_newline() -> None:
     text = (
         "id,kommentar,beloeb\n"
-        "1,\"Kunden ringede.\nSagen er lukket.\",100\n"
+        '1,"Kunden ringede.\nSagen er lukket.",100\n'
         "2,Ingen bemærkninger,200\n"
         '3,"Bemærk: ""vigtig"" sag",300\n'
     )

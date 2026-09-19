@@ -18,7 +18,10 @@ danish_semicolon.csv:
   n_loaded: 12
   n_rejected: 0
   columns: [kunde_id, alder, beloeb, dato, email]
-  candidate_keys: [kunde_id]
+  # 'dato' happens to be unique across these 12 rows too. The profiler reports
+  # what it observes rather than what it assumes the key is; deciding which
+  # candidate is the real key is the brief's job, not the profiler's.
+  candidate_keys: [kunde_id, dato]
   n_duplicate_rows: 0
   types:
     kunde_id:

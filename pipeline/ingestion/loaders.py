@@ -354,9 +354,7 @@ def parse_parquet(path: Path) -> ParsedTable:
         types = [row[1] for row in described]
         rows = [
             list(row)
-            for row in con.execute(
-                "SELECT * FROM read_parquet(?)", [path.as_posix()]
-            ).fetchall()
+            for row in con.execute("SELECT * FROM read_parquet(?)", [path.as_posix()]).fetchall()
         ]
     finally:
         con.close()
@@ -409,9 +407,7 @@ def load(
     if parsed.typed:
         raw_table = store.create_typed_table(name, parsed.columns, parsed.column_types, parsed.rows)
     else:
-        raw_table = store.create_text_table(
-            name, parsed.columns, parsed.rows, parsed.source_lines
-        )
+        raw_table = store.create_text_table(name, parsed.columns, parsed.rows, parsed.source_lines)
 
     rejects_table = store.create_rejects_table(name, parsed.rejects)
     raw_table = RawTable(

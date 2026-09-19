@@ -53,6 +53,15 @@ class RawTable:
 class RawStore:
     """Owns the DuckDB connection and the three schemas the pipeline uses."""
 
+    CATALOG = "pipeline_db"
+    """Fixed catalog name for a file-backed store.
+
+    DuckDB names the catalog after the file, so a database called `raw.duckdb`
+    would collide with the `raw` schema and make every `raw.<table>` reference
+    ambiguous. Attaching under a fixed alias keeps table names stable no matter
+    what the file is called.
+    """
+
     def __init__(self, connection: duckdb.DuckDBPyConnection) -> None:
         self._con = connection
         for schema in SCHEMAS:
@@ -61,8 +70,15 @@ class RawStore:
     @classmethod
     def open(cls, path: str | Path | None = None) -> RawStore:
         """Open a store on disk, or in memory when `path` is None (tests, dry runs)."""
-        target = ":memory:" if path is None else str(Path(path))
-        return cls(duckdb.connect(target))
+        if path is None:
+            return cls(duckdb.connect(":memory:"))
+
+        connection = duckdb.connect(":memory:")
+        # ATTACH takes no bind parameters, so the path is quoted by hand.
+        literal = str(Path(path)).replace("'", "''")
+        connection.execute(f"ATTACH '{literal}' AS {cls.CATALOG}")
+        connection.execute(f"USE {cls.CATALOG}")
+        return cls(connection)
 
     def __enter__(self) -> RawStore:
         return self
@@ -143,8 +159,7 @@ class RawStore:
         column_defs = ", ".join(f"{quote_ident(name)} {column_types[name]}" for name in columns)
         self._con.execute(f"DROP TABLE IF EXISTS {qualified}")
         self._con.execute(
-            f"CREATE TABLE {qualified} "
-            f"({ROW_ID} BIGINT, {SOURCE_LINE} BIGINT, {column_defs})"
+            f"CREATE TABLE {qualified} ({ROW_ID} BIGINT, {SOURCE_LINE} BIGINT, {column_defs})"
         )
 
         if rows:
@@ -189,9 +204,7 @@ class RawStore:
 
     def fetch(self, table: str, columns: Sequence[str] | None = None) -> list[tuple[Any, ...]]:
         """All rows in row-id order. Order is part of the contract: hashes depend on it."""
-        selection = (
-            ", ".join(quote_ident(name) for name in columns) if columns is not None else "*"
-        )
+        selection = ", ".join(quote_ident(name) for name in columns) if columns is not None else "*"
         return self._con.execute(
             f"SELECT {selection} FROM {self._qualify(table)} ORDER BY {ROW_ID}"
         ).fetchall()
@@ -226,8 +239,7 @@ class RawStore:
         schema, _, name = table.rpartition(".")
         return bool(
             self._con.execute(
-                "SELECT 1 FROM information_schema.tables "
-                "WHERE table_schema = ? AND table_name = ?",
+                "SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
                 [schema or RAW_SCHEMA, name],
             ).fetchone()
         )

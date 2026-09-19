@@ -164,9 +164,7 @@ class TestLoading:
         """Spec 4.1: unreadable lines go to the rejects table, they are not lost."""
         result, table = load_fixture(fixtures_dir, store, "too_many_fields.csv")
         spec = expected["too_many_fields.csv"]["rejects"]
-        assert [
-            {"source_line": r.source_line, "reason": r.reason} for r in result.rejects
-        ] == spec
+        assert [{"source_line": r.source_line, "reason": r.reason} for r in result.rejects] == spec
         assert all(r.raw for r in result.rejects)
 
         stored = store.connection.execute(f"SELECT * FROM {table.rejects_table}").fetchall()
@@ -197,8 +195,9 @@ class TestLoading:
         assert table.column_types["beloeb"].startswith("DECIMAL")
         assert table.column_types["dato"] == "DATE"
         assert table.column_types["aktiv"] == "BOOLEAN"
-        assert store.column_values(table.name, "kunde_id") == (
-            expected["typed.parquet"]["values"]["kunde_id"]
+        assert (
+            store.column_values(table.name, "kunde_id")
+            == (expected["typed.parquet"]["values"]["kunde_id"])
         )
         assert store.column_values(table.name, "alder") == [31, 54, 23, None]
 

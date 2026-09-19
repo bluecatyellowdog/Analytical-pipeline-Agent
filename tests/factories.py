@@ -85,9 +85,7 @@ def load_result() -> LoadResult:
             RejectedLine(source_line=1_204, reason="6 fields, expected 5", raw="00417;31;...")
         ],
         columns=["kunde_id", "alder", "beloeb", "dato", "email"],
-        renames=[
-            ColumnRename(position=5, original="", final="column_5", reason="Blank header.")
-        ],
+        renames=[ColumnRename(position=5, original="", final="column_5", reason="Blank header.")],
         data_hash="b" * 64,
     )
 
