@@ -52,3 +52,30 @@ Format: choice, alternatives, reason. Newest at the bottom.
 ## D011 — A bare 8-digit number is not a phone number
 - **Choice:** without a column-name hint, phone detection requires a `+45` prefix or grouped digits.
 - **Reason:** otherwise every amount, postcode and account column in a Danish dataset is flagged as PII and masked, which costs the analysis real information for no privacy gain.
+
+## D012 — Ops declare intent; the executor does the accounting
+- **Choice:** an op returns an `OpPlan` (expressions, renames, a filter) and never touches DuckDB. `apply_op` hashes before and after, counts changed cells and new nulls, captures dropped rows and builds the `OpRecord`.
+- **Alternatives:** each op executes its own SQL and reports its own statistics.
+- **Reason:** an op cannot then forget, understate or opt out of its own audit, and adding an op cannot weaken the guarantees. It also means `code` in the record is the statement that actually ran.
+
+## D013 — Each op writes a new versioned table
+- **Choice:** `clean.<name>__v1`, `__v2`, …, published as `clean.<name>` at the end.
+- **Alternatives:** update in place.
+- **Reason:** before/after diffs become a plain join, and replay reproduces every intermediate state rather than only the final one. Storage cost is acceptable for tabular data of this size.
+
+## D014 — No silent coercion is enforced, not just documented
+- **Choice:** `apply_op` raises if an op introduces nulls without `allow_new_nulls`. A cast must pass `on_error="null"` to null out values that do not parse, which also raises a flag.
+- **Reason:** this is the failure mode from spec 5.3 — unparseable values become NaN and then get imputed — and a rule that is only written down does not prevent it.
+
+## D015 — `drop_rows` takes a condition, not a predicate
+- **Choice:** column + comparison + value, never a SQL string.
+- **Reason:** the parameters eventually come from an LLM. A closed vocabulary means no generated SQL reaches the execution path at all, rather than relying on sanitising it.
+
+## D016 — PSI is implemented directly rather than pulled from a library
+- **Choice:** ~15 lines in `checks/reconciliation.py`, no scipy.
+- **Alternatives:** scipy's KS test as the spec also suggests.
+- **Reason:** the number ends up in an audit trail, so being able to read its definition next to the check matters more than the dependency. KS with a proper p-value can be added when scipy arrives for the modelling phase.
+
+## D017 — Cell diff compares net change against claimed change
+- **Choice:** a column whose cells differ from raw must have been targeted by some op, and the sum of claimed changes must be at least the net difference.
+- **Reason:** per-op counts can legitimately exceed the net difference (an op changes a value, a later one changes it back), so equality would produce false failures. The direction that matters — a change nothing claimed — is still caught exactly.
