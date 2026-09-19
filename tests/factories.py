@@ -15,6 +15,7 @@ from pipeline.contracts import (
     Claim,
     ColumnNote,
     ColumnProfile,
+    ColumnRename,
     ColumnSchema,
     ColumnStats,
     ContextBrief,
@@ -84,7 +85,9 @@ def load_result() -> LoadResult:
             RejectedLine(source_line=1_204, reason="6 fields, expected 5", raw="00417;31;...")
         ],
         columns=["kunde_id", "alder", "beloeb", "dato", "email"],
-        renamed_columns={"": "column_5"},
+        renames=[
+            ColumnRename(position=5, original="", final="column_5", reason="Blank header.")
+        ],
         data_hash="b" * 64,
     )
 

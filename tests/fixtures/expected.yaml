@@ -1,0 +1,203 @@
+# Expected results for the fixture set (spec 4.5).
+#
+# This file is the specification for ingestion and profiling: when a real file
+# breaks something, add a fixture and its expectations here first, then fix the
+# code. Counts were derived by hand from the fixture contents, not captured from
+# a run, so a change in behaviour shows up as a test failure rather than a
+# quietly updated baseline.
+#
+# `coverage` is the share of NON-MISSING values a candidate parser accepts.
+# `n_missing` counts nulls plus recognised null tokens, blanks included.
+
+danish_semicolon.csv:
+  description: Danish export - semicolons, decimal commas, leading-zero IDs, NA, 999, email.
+  format: csv
+  encoding: utf-8
+  delimiter: ";"
+  n_source_rows: 12
+  n_loaded: 12
+  n_rejected: 0
+  columns: [kunde_id, alder, beloeb, dato, email]
+  candidate_keys: [kunde_id]
+  n_duplicate_rows: 0
+  types:
+    kunde_id:
+      proposed: id
+      coverage: 1.0
+      details: {leading_zeros: true}
+    alder:
+      proposed: integer
+      coverage: 1.0
+    beloeb:
+      proposed: float
+      coverage: 1.0
+      details: {decimal_separator: ",", thousands_separator: "."}
+    dato:
+      proposed: date
+      coverage: 1.0
+      ambiguous: false
+      details: {date_format: "%d-%m-%Y"}
+    email:
+      proposed: text
+      coverage: 1.0
+  columns_detail:
+    kunde_id: {n_missing: 0, n_distinct: 12}
+    alder: {n_missing: 2, null_tokens: {NA: 2}, n_distinct: 10}
+    beloeb: {n_missing: 0, n_distinct: 10}
+    dato: {n_missing: 0, n_distinct: 12}
+    email: {n_missing: 5, null_tokens: {"": 4, NA: 1}, n_blank: 4, n_distinct: 7}
+  sentinels:
+    beloeb: [{value: "999", count: 3}]
+  pii:
+    email: {kind: email, level: likely, n_matches: 7}
+
+bom_excel_export.csv:
+  description: Excel "save as CSV" - UTF-8 with a byte-order mark and CRLF endings.
+  format: csv
+  encoding: utf-8-sig
+  delimiter: ","
+  n_source_rows: 3
+  n_loaded: 3
+  n_rejected: 0
+  # The BOM must be stripped by the decoder, never carried into the first column name.
+  columns: [id, navn, antal]
+  candidate_keys: [id, navn, antal]
+  types:
+    id: {proposed: id, coverage: 1.0}
+    navn: {proposed: text, coverage: 1.0}
+    antal: {proposed: integer, coverage: 1.0}
+  columns_detail:
+    id: {n_missing: 0, n_distinct: 3}
+
+latin1_aeoeaa.csv:
+  description: Older Danish system export in cp1252, with ae/oe/aa in header and values.
+  format: csv
+  encoding: cp1252
+  delimiter: ";"
+  n_source_rows: 3
+  n_loaded: 3
+  n_rejected: 0
+  columns: [navn, by, "beløb"]
+  types:
+    "beløb": {proposed: float, coverage: 1.0, details: {decimal_separator: ","}}
+  values:
+    # Round-trip check: the decoded values must be exactly these.
+    navn: ["Søren Østergård", "Åse Bæk", "Mads Nørgaard"]
+    by: ["København", "Ærøskøbing", "Århus"]
+
+quoted_newline.csv:
+  description: A quoted field spanning two lines; rows follow records, not lines.
+  format: csv
+  encoding: utf-8
+  delimiter: ","
+  n_source_rows: 3
+  n_loaded: 3
+  n_rejected: 0
+  columns: [id, kommentar, beloeb]
+  values:
+    kommentar:
+      - "Kunden ringede.\nSagen er lukket."
+      - "Ingen bemærkninger"
+      - "Bemærk: \"vigtig\" sag"
+  # _source_line records where each record STARTS, so record 2 is line 4, not 3.
+  source_lines: [2, 4, 5]
+
+duplicate_blank_headers.csv:
+  description: Duplicate and blank headers, renamed deterministically and reported.
+  format: csv
+  encoding: utf-8
+  delimiter: ","
+  n_source_rows: 2
+  n_loaded: 2
+  n_rejected: 0
+  # Rule: a blank header becomes column_<1-based position>; a repeated name gets
+  # _<n> for its nth occurrence. Both are reported, never silently collapsed.
+  columns: [id, navn, column_3, navn_2, column_5]
+  renames:
+    - {position: 3, original: "", final: column_3}
+    - {position: 4, original: navn, final: navn_2}
+    - {position: 5, original: "", final: column_5}
+
+too_many_fields.csv:
+  description: Malformed lines are rejected with a reason, never dropped or padded.
+  format: csv
+  encoding: utf-8
+  delimiter: ","
+  n_source_rows: 5
+  n_loaded: 3
+  n_rejected: 2
+  columns: [id, navn, beloeb]
+  rejects:
+    - {source_line: 3, reason: "4 fields, expected 3"}
+    - {source_line: 5, reason: "2 fields, expected 3"}
+
+ambiguous_dates.csv:
+  description: No day exceeds 12, so day/month order cannot be decided from the data.
+  format: csv
+  encoding: utf-8
+  delimiter: ","
+  n_source_rows: 6
+  n_loaded: 6
+  n_rejected: 0
+  columns: [id, dato]
+  types:
+    dato:
+      proposed: date
+      coverage: 1.0
+      ambiguous: true
+      # Both readings parse every value, which is exactly why it must be flagged.
+      alternatives: {"%d/%m/%Y": 1.0, "%m/%d/%Y": 1.0}
+  flags:
+    dato: [ambiguous_date_order]
+
+cpr_numbers.csv:
+  description: Danish CPR numbers; only a valid date in the first six digits counts.
+  format: csv
+  encoding: utf-8
+  delimiter: ";"
+  n_source_rows: 8
+  n_loaded: 8
+  n_rejected: 0
+  columns: [sagsnr, cpr, note]
+  columns_detail:
+    cpr: {n_missing: 1, n_blank: 1}
+  pii:
+    # Rows 5-7 are look-alikes with impossible dates and must not count.
+    cpr: {kind: cpr, level: likely, n_matches: 4, matched_column_name: true}
+
+two_sheets.xlsx:
+  description: Two-sheet workbook whose IDs are text like '001'.
+  format: excel
+  sheets: [kunder, konti]
+  # Without an explicit sheet, the first one is loaded and the choice is reported.
+  default_sheet: kunder
+  n_source_rows: 3
+  n_loaded: 3
+  n_rejected: 0
+  columns: [kunde_id, navn, saldo]
+  types:
+    kunde_id: {proposed: id, coverage: 1.0, details: {leading_zeros: true}}
+    saldo: {proposed: integer, coverage: 1.0}
+  values:
+    # The whole point: '001' must not arrive as 1.
+    kunde_id: ["001", "002", "003"]
+
+typed.parquet:
+  description: Parquet carries its own types - the documented exception to text-first loading.
+  format: parquet
+  n_source_rows: 4
+  n_loaded: 4
+  n_rejected: 0
+  columns: [kunde_id, alder, beloeb, dato, aktiv]
+  # Types come from the file, so proposals just restate them at full coverage.
+  types:
+    kunde_id: {proposed: id, coverage: 1.0}
+    alder: {proposed: integer, coverage: 1.0}
+    beloeb: {proposed: float, coverage: 1.0}
+    dato: {proposed: date, coverage: 1.0}
+    aktiv: {proposed: boolean, coverage: 1.0}
+  columns_detail:
+    alder: {n_missing: 1}
+    beloeb: {n_missing: 1}
+  values:
+    kunde_id: ["001", "002", "003", "004"]

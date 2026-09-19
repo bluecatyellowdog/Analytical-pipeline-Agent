@@ -40,6 +40,19 @@ class RejectedLine(Strict):
     raw: str = Field(description="The literal line, truncated for storage.")
 
 
+class ColumnRename(Strict):
+    """A header the loader had to rename to make column names usable.
+
+    A list rather than a mapping: several blank headers share the original name
+    `''`, so only the position identifies them.
+    """
+
+    position: int = Field(ge=1, description="1-based column position in the source.")
+    original: str
+    final: str
+    reason: str
+
+
 class LoadResult(Strict):
     """The outcome of loading one file into the read-only raw layer."""
 
@@ -50,9 +63,9 @@ class LoadResult(Strict):
     n_rejected: int
     rejects: list[RejectedLine] = Field(default_factory=list)
     columns: list[str] = Field(description="Final column names, after deduplication.")
-    renamed_columns: dict[str, str] = Field(
-        default_factory=dict,
-        description="Deterministic renames for duplicate or blank headers: original -> final.",
+    renames: list[ColumnRename] = Field(
+        default_factory=list,
+        description="Deterministic renames for duplicate or blank headers, reported not hidden.",
     )
     empty_columns: list[str] = Field(default_factory=list)
     data_hash: str = Field(description="SHA-256 of the loaded values, independent of the file.")

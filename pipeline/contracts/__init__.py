@@ -39,6 +39,7 @@ from pipeline.contracts.context_brief import (
 )
 from pipeline.contracts.handoff import ColumnSchema, Handoff
 from pipeline.contracts.ingestion import (
+    ColumnRename,
     FileFormat,
     FileInfo,
     LoadResult,
@@ -88,6 +89,7 @@ __all__ = [
     "ClaimStatus",
     "ColumnNote",
     "ColumnProfile",
+    "ColumnRename",
     "ColumnSchema",
     "ColumnStats",
     "ContextBrief",
