@@ -268,6 +268,8 @@ class TestCli:
             "claims.json",
             "gate_1.json",
             "profile.txt",
+            "ingestion_report.md",
+            "rejected_lines.csv",
         }
         for path in out.glob("*.json"):
             json.loads(path.read_text(encoding="utf-8"))

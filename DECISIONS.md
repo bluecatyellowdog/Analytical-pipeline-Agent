@@ -79,3 +79,9 @@ Format: choice, alternatives, reason. Newest at the bottom.
 ## D017 — Cell diff compares net change against claimed change
 - **Choice:** a column whose cells differ from raw must have been targeted by some op, and the sum of claimed changes must be at least the net difference.
 - **Reason:** per-op counts can legitimately exceed the net difference (an op changes a value, a later one changes it back), so equality would produce false failures. The direction that matters — a change nothing claimed — is still caught exactly.
+
+## D018 -- A readable ingestion report and a saved rejected-lines file
+- **Choice:** `--out` now also writes `ingestion_report.md` (what was read, what was not, column by column, flags, Gate 1, brief claims, a masked row preview) and `rejected_lines.csv` (every rejected line in full, with its source line number).
+- **Alternatives:** print the rejects on request only; leave them in the DuckDB `__rejects` table, which is in-memory and disposed of at the end of the run unless `--db` is used.
+- **Reason:** the JSON artifacts are complete but not something a person reads to answer "did this work". The report is built entirely from `load_result`, `profile` and `gate`, so its numbers are never a second source of truth.
+- **Note:** `rejected_lines.csv` holds unmasked source text, deliberately, since the point of the file is to locate the bad line in the original. It is written only under `--out`, and the report says explicitly to keep it out of version control.

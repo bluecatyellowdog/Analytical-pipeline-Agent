@@ -25,6 +25,12 @@ from pipeline.ingestion.compact import compact_profile, render_profile_lines
 from pipeline.ingestion.loaders import load
 from pipeline.ingestion.profiler import profile_table
 from pipeline.ingestion.raw import RawStore, RawTable
+from pipeline.report import (
+    REJECTS_FILENAME,
+    REPORT_FILENAME,
+    render_ingestion_report,
+    write_rejected_csv,
+)
 from pipeline.runtime import git_is_dirty, git_sha, pipeline_version, platform_name, python_version
 
 PLACEHOLDER_BRIEF = ContextBrief(
@@ -44,13 +50,15 @@ class IngestionResult:
     profile: DatasetProfile
     claim_results: list[ClaimResult]
     gate: GateResult
+    report: str
+    """The readable ingestion report, rendered while the store was open."""
 
     @property
     def blocked(self) -> bool:
         return self.gate.blocked
 
     def write(self, out_dir: str | Path) -> Path:
-        """Write every artifact as JSON, plus the text profile a human reads."""
+        """Write every artifact as JSON, plus the report and the rejected lines."""
         directory = Path(out_dir)
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -80,6 +88,8 @@ class IngestionResult:
             encoding="utf-8",
         )
         (directory / "profile.txt").write_text(render_profile_lines(self.profile), encoding="utf-8")
+        (directory / REPORT_FILENAME).write_text(self.report, encoding="utf-8")
+        write_rejected_csv(self.load_result.rejects, directory / REJECTS_FILENAME)
         return directory
 
 
@@ -103,6 +113,10 @@ def ingest(
     # The raw layer must be exactly what was loaded; profiling only reads.
     store.verify(raw_table)
 
+    report = render_ingestion_report(
+        load_result, profile, gate, claim_results, store=store, table=raw_table
+    )
+
     manifest = RunManifest(
         pipeline_version=pipeline_version(),
         python_version=python_version(),
@@ -122,11 +136,16 @@ def ingest(
         profile=profile,
         claim_results=claim_results,
         gate=gate,
+        report=report,
     )
 
 
 def _summarise(result: IngestionResult) -> str:
+    load = result.load_result
     lines = [
+        f"Read {load.n_loaded:,} of {load.n_source_rows:,} data rows; "
+        f"{load.n_rejected:,} rejected ({load.reject_rate:.2%}).",
+        "",
         render_profile_lines(result.profile),
         "",
         f"Gate 1: {result.gate.outcome.upper()}",
@@ -166,6 +185,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.out:
             directory = result.write(args.out)
             print(f"\nWrote {len(list(directory.iterdir()))} files to {directory}")
+            print(f"Read the report: {directory / REPORT_FILENAME}")
+            if result.load_result.n_rejected:
+                print(f"Rejected lines:  {directory / REJECTS_FILENAME}")
 
     return 1 if result.blocked else 0
 
