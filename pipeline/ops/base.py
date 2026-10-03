@@ -26,6 +26,7 @@ from pipeline.hashing import hash_values
 from pipeline.ingestion.raw import (
     AUDIT_SCHEMA,
     CLEAN_SCHEMA,
+    RESERVED_COLUMNS,
     ROW_ID,
     SOURCE_LINE,
     RawStore,
@@ -101,6 +102,18 @@ class OpPlan:
     flags: list[Flag] = field(default_factory=list)
     allow_new_nulls: bool = False
     """Set only by ops whose whole purpose is to introduce nulls, e.g. replace_sentinel."""
+    allow_new_nulls_in: list[str] = field(default_factory=list)
+    """Columns where new nulls are declared, when only some may gain them (custom code)."""
+    new_columns: list[str] = field(default_factory=list)
+    """Columns this op adds, appended after the existing ones."""
+    may_drop_rows: bool = True
+    """False when the op declared it keeps every row; a drop is then refused."""
+    materialize: Callable[[OpContext, str], str] | None = None
+    """Builds the new table itself and returns the code it ran (custom code).
+
+    When set, `expressions`, `where` and `distinct_on` are ignored; the same
+    accounting still applies, and the actual columns must match the declared ones.
+    """
 
 
 @dataclass(frozen=True)
@@ -179,10 +192,18 @@ def apply_op(
     rows_before = store.row_count(ctx.table)
     input_hash = store.data_hash(ctx.table, ctx.columns)
 
+    clashing = [c for c in plan.new_columns if c in ctx.columns or c in RESERVED_COLUMNS]
+    if clashing:
+        raise OpError(f"op {name!r} would add column(s) {clashing} that already exist")
+
     new_table = ctx.next_table()
-    sql = _build_sql(ctx, plan, new_table)
     store.connection.execute(f"DROP TABLE IF EXISTS {_qualified(new_table)}")
-    store.connection.execute(sql)
+    if plan.materialize is not None:
+        sql = plan.materialize(ctx, _qualified(new_table))
+        _require_declared_columns(store, name, new_table, columns_after)
+    else:
+        sql = _build_sql(ctx, plan, new_table)
+        store.connection.execute(sql)
 
     rows_after = store.row_count(new_table)
     rows_dropped = rows_before - rows_after
@@ -191,6 +212,13 @@ def apply_op(
             f"op {name!r} produced {rows_after} rows from {rows_before}: ops may not create rows"
         )
 
+    if rows_dropped and not plan.may_drop_rows:
+        raise OpError(
+            f"op {name!r} dropped {rows_dropped} row(s) without declaring it; "
+            f"give a drop_reason if dropping rows is intended"
+        )
+    _refuse_undeclared_changes(store, name, ctx, new_table, plan, touched, columns_after)
+
     dropped_table = ctx.dropped_table
     if rows_dropped:
         dropped_table = _capture_dropped_rows(ctx, new_table, name, plan.drop_reason or name)
@@ -198,8 +226,13 @@ def apply_op(
     after = _column_stats(store, new_table, columns_after)
     cells_changed, new_nulls = _diff(store, ctx, new_table, touched, columns_after)
 
-    if new_nulls and not plan.allow_new_nulls:
-        _reject_silent_coercion(name, new_nulls)
+    undeclared_nulls = {
+        column: count
+        for column, count in new_nulls.items()
+        if not plan.allow_new_nulls and column not in plan.allow_new_nulls_in
+    }
+    if undeclared_nulls:
+        _reject_silent_coercion(name, undeclared_nulls)
 
     record = OpRecord(
         op_name=name,
@@ -240,9 +273,76 @@ def _reject_silent_coercion(name: str, new_nulls: dict[str, int]) -> None:
     )
 
 
+def _require_declared_columns(
+    store: RawStore, name: str, new_table: str, columns_after: Sequence[str]
+) -> None:
+    """Code that builds its own table must produce exactly the declared columns."""
+    actual = store.columns_of(new_table)
+    undeclared = [c for c in actual if c not in columns_after]
+    missing = [c for c in columns_after if c not in actual]
+    if undeclared or missing:
+        parts = []
+        if undeclared:
+            parts.append(f"undeclared new column(s) {undeclared} (declare them in adds)")
+        if missing:
+            parts.append(f"missing column(s) {missing} (declare removals in drops)")
+        raise OpError(f"op {name!r} produced " + " and ".join(parts))
+    if actual != list(columns_after):
+        store.connection.execute(
+            f"CREATE OR REPLACE TABLE {_qualified(new_table)} AS SELECT {ROW_ID}, {SOURCE_LINE}, "
+            + ", ".join(quote_ident(c) for c in columns_after)
+            + f" FROM {_qualified(new_table)} ORDER BY {ROW_ID}"
+        )
+
+
+def _refuse_undeclared_changes(
+    store: RawStore,
+    name: str,
+    ctx: OpContext,
+    new_table: str,
+    plan: OpPlan,
+    touched: Sequence[str],
+    columns_after: Sequence[str],
+) -> None:
+    """A column the op did not declare must come out identical, value and type.
+
+    Checked per op, not only at the end, so a mistake is reported against the
+    step that made it, which is what an agent needs to correct it.
+    """
+    old_types = store.column_types_of(ctx.table)
+    new_types = store.column_types_of(new_table)
+    changed: dict[str, int | str] = {}
+
+    for column in ctx.columns:
+        if column in touched or column in plan.drop_columns:
+            continue
+        alias = plan.renames.get(column, column)
+        if alias not in columns_after:
+            continue
+        if old_types.get(column) != new_types.get(alias):
+            changed[column] = f"type {old_types.get(column)} -> {new_types.get(alias)}"
+            continue
+        differing = store.connection.execute(
+            f"SELECT count(*) FROM {_qualified(ctx.table)} a "
+            f"JOIN {_qualified(new_table)} b USING ({ROW_ID}) "
+            f"WHERE a.{quote_ident(column)} IS DISTINCT FROM b.{quote_ident(alias)}"
+        ).fetchone()[0]
+        if differing:
+            changed[column] = int(differing)
+
+    if changed:
+        detail = ", ".join(
+            f"{c} ({v} cells)" if isinstance(v, int) else f"{c} ({v})" for c, v in changed.items()
+        )
+        raise OpError(
+            f"op {name!r} made undeclared changes to column(s): {detail}. "
+            f"Declare every column the op changes."
+        )
+
+
 def _columns_after(columns: Sequence[str], plan: OpPlan) -> list[str]:
     kept = [c for c in columns if c not in plan.drop_columns]
-    return [plan.renames.get(c, c) for c in kept]
+    return [plan.renames.get(c, c) for c in kept] + list(plan.new_columns)
 
 
 def _build_sql(ctx: OpContext, plan: OpPlan, new_table: str) -> str:

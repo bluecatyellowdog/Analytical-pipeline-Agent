@@ -2,7 +2,11 @@
 Reference: docs/project_spec.pdf. Read the relevant section before larger changes.
 
 ## Principles (do not violate)
-- The LLM decides, tools execute: no data transformation outside logged ops in pipeline/ops/.
+- The LLM decides, tools execute: no data transformation outside pipeline/ops/, either a library op
+  or agent-written code run through the `custom_code` op. Both go through `apply_op`'s accounting.
+- Custom code is allowed, never unchecked: it declares every column it changes/adds/drops, any nulls
+  or dropped rows with a reason, runs in the sandbox (pipeline/ops/sandbox.py), and is logged and
+  replayed like any op. Prefer a library op when one fits.
 - Every op returns (new_table, OpRecord) with params, exact code, before/after stats.
 - Raw data is read-only. Never write to the raw schema or data/raw/.
 - CSV/Excel are loaded as literal text; types are applied later as logged cast ops.

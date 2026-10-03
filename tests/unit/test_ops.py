@@ -45,8 +45,9 @@ def run(ctx, name, params=None, **kwargs):
 
 class TestLibrary:
     def test_the_library_has_the_planned_ops(self) -> None:
-        """Spec 3: roughly 15 ops, fixed. A closed vocabulary is the point."""
-        assert len(op_names()) == 15
+        """15 library ops plus custom_code for the long tail (D022)."""
+        assert len(op_names()) == 16
+        assert "custom_code" in op_names()
         assert {"cast", "impute", "drop_duplicates", "clip_outliers", "drop_column"} <= set(
             op_names()
         )

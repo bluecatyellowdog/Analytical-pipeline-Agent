@@ -36,7 +36,7 @@ Phase 1's exit criteria are met: a dataset can be cleaned by hand through the op
 
 - **[pipeline/contracts/](pipeline/contracts/)** — every stage boundary as a Pydantic model. The validators enforce audit invariants at construction: row accounting must balance, a rejected review must carry a fix request, an artifact without audit references cannot be built.
 - **[pipeline/ingestion/](pipeline/ingestion/)** — detection, loaders, the immutable raw layer, type inference, profiling, PII detection and masking, claim verification, and the compact LLM profile.
-- **[pipeline/ops/](pipeline/ops/)** — 15 logged operations and the executor that audits them. Nothing changes data outside this package.
+- **[pipeline/ops/](pipeline/ops/)** — 15 library operations, the `custom_code` op for agent-written pandas code (run in a sandboxed process), and the executor that audits both. Nothing changes data outside this package.
 - **[pipeline/checks/](pipeline/checks/)** — Gate 1 and the reconciliation checks: row accounting, cell diff, untouched-column comparison, distribution shift, and replay against the output hash.
 - **[tests/fixtures/](tests/fixtures/)** — the ten deliberately nasty files from spec 4.5, with their expected results written out in [expected.yaml](tests/fixtures/expected.yaml). That file is the specification the loaders are tested against.
 
@@ -45,7 +45,8 @@ Phase 1's exit criteria are met: a dataset can be cleaned by hand through the op
 | Guarantee | Enforced by |
 | --- | --- |
 | Raw data is immutable | `RawStore.verify()` — recomputes the table hash, raises if anything touched it |
-| Nothing changes outside a logged op | `apply_op` does all accounting; ops never touch the database |
+| Nothing changes outside a logged op | `apply_op` does all accounting; library ops never touch the database |
+| Custom code changes only what it declares | `apply_op` refuses undeclared column changes, undeclared nulls, undeclared row drops and new rows; `sandbox.py` refuses file, network and process access |
 | No silent coercion | `apply_op` raises on undeclared new nulls |
 | Every change is accounted for | `checks/reconciliation.py`, including replay from raw |
 | The LLM never sees raw rows or personal data | `ingestion/compact.py`, with an integration test asserting no personal value appears |

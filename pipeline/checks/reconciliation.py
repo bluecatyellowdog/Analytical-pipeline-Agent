@@ -34,6 +34,8 @@ def final_name_of(column: str, records: Sequence[OpRecord]) -> str | None:
             current = record.params["to"]
         elif record.op_name == "drop_column" and record.params.get("column") == current:
             return None
+        elif record.op_name == "custom_code" and current in record.params.get("drops", []):
+            return None
     return current
 
 
