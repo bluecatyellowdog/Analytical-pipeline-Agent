@@ -291,10 +291,28 @@ class TestCli:
         assert "Brief claims:" in output
         assert "cust_id is unique" in output
 
-    def test_a_blocked_run_exits_non_zero(self, tmp_path, capsys) -> None:
+    def test_a_blocked_run_exits_non_zero(self, tmp_path, capsys, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
         path = tmp_path / "broken.csv"
         rows = "\n".join(f"{i},x" for i in range(50))
         path.write_text(f"id,navn\n{rows}\n1,too,many\n", encoding="utf-8")
 
         assert main([str(path)]) == 1
         assert "Gate 1: BLOCK" in capsys.readouterr().out
+
+    def test_without_out_every_run_lands_in_runs_and_the_index(
+        self, fixtures_dir, tmp_path, capsys, monkeypatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        main([str(fixtures_dir / "danish_semicolon.csv")])
+        main([str(fixtures_dir / "latin1_aeoeaa.csv")])
+
+        folders = [p for p in (tmp_path / "runs").iterdir() if p.is_dir()]
+        assert len(folders) == 2
+        assert all((p / "ingestion_report.md").exists() for p in folders)
+
+        index = (tmp_path / "runs" / "index.md").read_text(encoding="utf-8")
+        assert "danish_semicolon.csv" in index
+        assert "latin1_aeoeaa.csv" in index
+        assert index.count("ingestion_report.md") == 2
+        assert index.index("latin1_aeoeaa.csv") < index.index("danish_semicolon.csv")

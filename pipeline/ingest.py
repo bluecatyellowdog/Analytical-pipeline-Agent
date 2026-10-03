@@ -12,6 +12,7 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from pipeline.checks.gates import gate_1_ingestion
@@ -162,6 +163,36 @@ def _summarise(result: IngestionResult) -> str:
     return "\n".join(lines)
 
 
+RUNS_DIR = Path("runs")
+INDEX_FILENAME = "index.md"
+
+
+def default_out_dir(source: str | Path, now: datetime | None = None) -> Path:
+    """runs/<file name>_<timestamp>: one folder per run, nothing overwritten."""
+    stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    return RUNS_DIR / f"{Path(source).stem}_{stamp}"
+
+
+def update_index(result: IngestionResult, directory: Path, source: str | Path) -> Path:
+    """Add this run to runs/index.md, newest first, so every report is one click away."""
+    index = directory.parent / INDEX_FILENAME
+    header = (
+        "# Runs\n\nNewest first. Open a report from here.\n\n"
+        "| When | File | Rows loaded | Rejected | Gate 1 | Report |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+    )
+    load = result.load_result
+    row = (
+        f"| {datetime.now():%Y-%m-%d %H:%M} | {Path(source).name} | {load.n_loaded:,} "
+        f"| {load.n_rejected:,} | {result.gate.outcome.upper()} "
+        f"| [{directory.name}]({directory.name}/{REPORT_FILENAME}) |\n"
+    )
+    existing = index.read_text(encoding="utf-8") if index.exists() else header
+    head, _, rows = existing.partition("| --- | --- | --- | --- | --- | --- |\n")
+    index.write_text(f"{head}| --- | --- | --- | --- | --- | --- |\n{row}{rows}", encoding="utf-8")
+    return index
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m pipeline.ingest",
@@ -169,7 +200,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("path", help="CSV, Excel, Parquet or JSON file")
     parser.add_argument("--brief", help="Context brief YAML (see examples/context_brief.yaml)")
-    parser.add_argument("--out", help="Directory to write the JSON outputs to")
+    parser.add_argument(
+        "--out",
+        help="Output directory (default: runs/<file>_<timestamp>, listed in runs/index.md)",
+    )
     parser.add_argument("--db", help="DuckDB file for the raw layer (default: in memory)")
     parser.add_argument("--sheet", help="Excel sheet name (default: the first one)")
     parser.add_argument("--table", help="Table name in the raw schema (default: from the filename)")
@@ -182,12 +216,13 @@ def main(argv: list[str] | None = None) -> int:
             args.path, brief, store=store, sheet=args.sheet, table=args.table, seed=args.seed
         )
         print(_summarise(result))
-        if args.out:
-            directory = result.write(args.out)
-            print(f"\nWrote {len(list(directory.iterdir()))} files to {directory}")
-            print(f"Read the report: {directory / REPORT_FILENAME}")
-            if result.load_result.n_rejected:
-                print(f"Rejected lines:  {directory / REJECTS_FILENAME}")
+        directory = result.write(args.out or default_out_dir(args.path))
+        print(f"\nWrote {len(list(directory.iterdir()))} files to {directory.resolve()}")
+        print(f"Read the report: {(directory / REPORT_FILENAME).resolve()}")
+        if result.load_result.n_rejected:
+            print(f"Rejected lines:  {(directory / REJECTS_FILENAME).resolve()}")
+        if not args.out:
+            print(f"All runs:        {update_index(result, directory, args.path).resolve()}")
 
     return 1 if result.blocked else 0
 
