@@ -269,6 +269,7 @@ class TestCli:
             "gate_1.json",
             "profile.txt",
             "ingestion_report.md",
+            "ingestion_report.xlsx",
             "rejected_lines.csv",
         }
         for path in out.glob("*.json"):

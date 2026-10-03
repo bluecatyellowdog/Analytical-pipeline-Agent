@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from pipeline.contracts.audit import GateResult
@@ -56,8 +57,7 @@ def render_ingestion_report(
     gate: GateResult,
     claim_results: Sequence[ClaimResult],
     *,
-    store: RawStore,
-    table: RawTable,
+    preview: Preview,
 ) -> str:
     """The whole report as Markdown."""
     sections = [
@@ -70,7 +70,7 @@ def render_ingestion_report(
     ]
     if claim_results:
         sections.append(_claims_section(claim_results))
-    sections.append(_preview_section(store, table, profile))
+    sections.append(_preview_section(preview))
     return "\n\n".join(sections) + "\n"
 
 
@@ -220,41 +220,68 @@ def _claims_section(claim_results: Sequence[ClaimResult]) -> str:
     return "\n".join(lines)
 
 
-def _preview_section(store: RawStore, table: RawTable, profile: DatasetProfile) -> str:
-    """The first rows as loaded, with personal and identifier values masked."""
-    masked = {
+@dataclass(frozen=True)
+class Preview:
+    """The first loaded rows, already masked, for every report format to share."""
+
+    columns: list[str]
+    masked: list[str]
+    rows: list[tuple[int, list[str | None]]]
+    """(line in file, values) with personal and identifier values as their shape."""
+
+
+def masked_columns(profile: DatasetProfile) -> set[str]:
+    """Columns whose values are shown only as their shape: PII and identifiers."""
+    return {
         column.name
         for column in profile.columns
         if column.pii_level != "none" or column.type_proposal.proposed == "id"
     }
+
+
+def preview_rows(
+    store: RawStore, table: RawTable, profile: DatasetProfile, limit: int = PREVIEW_ROWS
+) -> Preview:
+    """Read the first rows as loaded and mask them. Reads only."""
+    masked = masked_columns(profile)
     columns = table.columns
     schema, _, name = table.name.rpartition(".")
     selection = ", ".join(["_source_line", *(quote_ident(c) for c in columns)])
     source = f"{schema}.{quote_ident(name)}"
-    rows = store.connection.execute(
-        f"SELECT {selection} FROM {source} ORDER BY _row_id LIMIT {PREVIEW_ROWS}"
+    raw = store.connection.execute(
+        f"SELECT {selection} FROM {source} ORDER BY _row_id LIMIT {limit}"
     ).fetchall()
+    rows = [
+        (
+            source_line,
+            [
+                mask_shape(v) if column in masked and v is not None else v
+                for column, v in zip(columns, values, strict=True)
+            ],
+        )
+        for source_line, *values in raw
+    ]
+    return Preview(columns=list(columns), masked=sorted(masked), rows=rows)
 
-    lines = [f"## First {len(rows)} loaded row(s)", ""]
-    if masked:
+
+def _preview_section(preview: Preview) -> str:
+    """The first rows as loaded, with personal and identifier values masked."""
+    lines = [f"## First {len(preview.rows)} loaded row(s)", ""]
+    if preview.masked:
         lines += [
             "Values in personal-data and identifier columns are shown as their shape only "
-            f"(masked: {', '.join(sorted(masked))}).",
+            f"(masked: {', '.join(preview.masked)}).",
             "",
         ]
-    if not rows:
+    if not preview.rows:
         return "\n".join([*lines, "No rows were loaded."])
 
     lines += [
-        "| Line in file | " + " | ".join(_cell(c) for c in columns) + " |",
-        "| ---: | " + " | ".join("---" for _ in columns) + " |",
+        "| Line in file | " + " | ".join(_cell(c) for c in preview.columns) + " |",
+        "| ---: | " + " | ".join("---" for _ in preview.columns) + " |",
     ]
-    for source_line, *values in rows:
-        cells = [
-            _cell(mask_shape(v) if column in masked and v is not None else v)
-            for column, v in zip(columns, values, strict=True)
-        ]
-        lines.append(f"| {source_line} | " + " | ".join(cells) + " |")
+    for source_line, values in preview.rows:
+        lines.append(f"| {source_line} | " + " | ".join(_cell(v) for v in values) + " |")
     return "\n".join(lines)
 
 
@@ -273,6 +300,9 @@ def _cell(value: object, limit: int = MAX_CELL_CHARS) -> str:
 __all__ = [
     "REJECTS_FILENAME",
     "REPORT_FILENAME",
+    "Preview",
+    "masked_columns",
+    "preview_rows",
     "render_ingestion_report",
     "write_rejected_csv",
 ]

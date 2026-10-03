@@ -29,9 +29,12 @@ from pipeline.ingestion.raw import RawStore, RawTable
 from pipeline.report import (
     REJECTS_FILENAME,
     REPORT_FILENAME,
+    Preview,
+    preview_rows,
     render_ingestion_report,
     write_rejected_csv,
 )
+from pipeline.report_xlsx import XLSX_FILENAME, write_ingestion_xlsx
 from pipeline.runtime import git_is_dirty, git_sha, pipeline_version, platform_name, python_version
 
 PLACEHOLDER_BRIEF = ContextBrief(
@@ -53,6 +56,8 @@ class IngestionResult:
     gate: GateResult
     report: str
     """The readable ingestion report, rendered while the store was open."""
+    preview: Preview
+    """The first loaded rows, masked, read while the store was open."""
 
     @property
     def blocked(self) -> bool:
@@ -91,6 +96,14 @@ class IngestionResult:
         (directory / "profile.txt").write_text(render_profile_lines(self.profile), encoding="utf-8")
         (directory / REPORT_FILENAME).write_text(self.report, encoding="utf-8")
         write_rejected_csv(self.load_result.rejects, directory / REJECTS_FILENAME)
+        write_ingestion_xlsx(
+            directory / XLSX_FILENAME,
+            self.load_result,
+            self.profile,
+            self.gate,
+            self.claim_results,
+            self.preview,
+        )
         return directory
 
 
@@ -114,9 +127,8 @@ def ingest(
     # The raw layer must be exactly what was loaded; profiling only reads.
     store.verify(raw_table)
 
-    report = render_ingestion_report(
-        load_result, profile, gate, claim_results, store=store, table=raw_table
-    )
+    preview = preview_rows(store, raw_table, profile)
+    report = render_ingestion_report(load_result, profile, gate, claim_results, preview=preview)
 
     manifest = RunManifest(
         pipeline_version=pipeline_version(),
@@ -138,6 +150,7 @@ def ingest(
         claim_results=claim_results,
         gate=gate,
         report=report,
+        preview=preview,
     )
 
 
@@ -185,7 +198,8 @@ def update_index(result: IngestionResult, directory: Path, source: str | Path) -
     row = (
         f"| {datetime.now():%Y-%m-%d %H:%M} | {Path(source).name} | {load.n_loaded:,} "
         f"| {load.n_rejected:,} | {result.gate.outcome.upper()} "
-        f"| [{directory.name}]({directory.name}/{REPORT_FILENAME}) |\n"
+        f"| [{directory.name}]({directory.name}/{REPORT_FILENAME}) "
+        f"· [Excel]({directory.name}/{XLSX_FILENAME}) |\n"
     )
     existing = index.read_text(encoding="utf-8") if index.exists() else header
     head, _, rows = existing.partition("| --- | --- | --- | --- | --- | --- |\n")
@@ -219,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         directory = result.write(args.out or default_out_dir(args.path))
         print(f"\nWrote {len(list(directory.iterdir()))} files to {directory.resolve()}")
         print(f"Read the report: {(directory / REPORT_FILENAME).resolve()}")
+        print(f"Excel overview:  {(directory / XLSX_FILENAME).resolve()}")
         if result.load_result.n_rejected:
             print(f"Rejected lines:  {(directory / REJECTS_FILENAME).resolve()}")
         if not args.out:

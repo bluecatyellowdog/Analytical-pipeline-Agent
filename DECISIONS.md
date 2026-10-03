@@ -85,3 +85,14 @@ Format: choice, alternatives, reason. Newest at the bottom.
 - **Alternatives:** print the rejects on request only; leave them in the DuckDB `__rejects` table, which is in-memory and disposed of at the end of the run unless `--db` is used.
 - **Reason:** the JSON artifacts are complete but not something a person reads to answer "did this work". The report is built entirely from `load_result`, `profile` and `gate`, so its numbers are never a second source of truth.
 - **Note:** `rejected_lines.csv` holds unmasked source text, deliberately, since the point of the file is to locate the bad line in the original. It is written only under `--out`, and the report says explicitly to keep it out of version control.
+
+## D019 -- Every run lands in runs/, listed in runs/index.md
+- **Choice:** without `--out`, ingestion writes to `runs/<file>_<timestamp>/` and adds a row (newest first) to `runs/index.md` linking the reports. An explicit `--out` is honoured as before and not indexed.
+- **Alternatives:** keep `--out` mandatory for writing; overwrite a fixed `runs/latest/`.
+- **Reason:** outputs were easy to lose. A timestamped folder never overwrites an earlier run, and one index file is a single place to find all of them. `runs/` stays gitignored because the rejected lines are unmasked.
+
+## D020 -- An Excel workbook alongside the Markdown report
+- **Choice:** each run also writes `ingestion_report.xlsx` with fixed sheets: Summary, Gate 1 checks, Flags, Columns, Claims, Rejected lines, Renames, Preview. Built from the same objects as the Markdown report; the masked preview is computed once (`report.preview_rows`) and shared by both.
+- **Alternatives:** replace the Markdown report; export the JSON artifacts to CSV.
+- **Reason:** the column profile is a table people want to sort and filter. Keeping the Markdown report means the audit record stays readable without Excel.
+- **Note:** value-bearing cells in the Columns sheet go through `compact_column`, so masking matches the LLM view; numeric summaries and coded-missing values of masked columns are hidden or masked too. Every string cell is stored as text, so a rejected line beginning with `=` is never evaluated as a formula. The Rejected lines sheet is unmasked, for the same reason as D018.
