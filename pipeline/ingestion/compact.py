@@ -78,7 +78,9 @@ def compact_column(column: ColumnProfile) -> dict[str, Any]:
     if column.null_tokens:
         entry["null_tokens"] = column.null_tokens
     if column.sentinel_candidates:
-        entry["sentinel_candidates"] = [s.value for s in column.sentinel_candidates]
+        entry["sentinel_candidates"] = [
+            mask_shape(s.value) if masked else s.value for s in column.sentinel_candidates
+        ]
     if column.pii_level != "none":
         entry["pii"] = {
             "level": column.pii_level,
