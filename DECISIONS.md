@@ -96,3 +96,9 @@ Format: choice, alternatives, reason. Newest at the bottom.
 - **Alternatives:** replace the Markdown report; export the JSON artifacts to CSV.
 - **Reason:** the column profile is a table people want to sort and filter. Keeping the Markdown report means the audit record stays readable without Excel.
 - **Note:** value-bearing cells in the Columns sheet go through `compact_column`, so masking matches the LLM view; numeric summaries and coded-missing values of masked columns are hidden or masked too. Every string cell is stored as text, so a rejected line beginning with `=` is never evaluated as a formula. The Rejected lines sheet is unmasked, for the same reason as D018.
+
+## D021 -- One OpenAI-compatible LLM client, any provider, configured by a single key
+- **Choice:** `pipeline/agents/llm.py` uses the `openai` package against whichever OpenAI-compatible endpoint the key belongs to. The provider is recognised from the key prefix (OpenRouter, Anthropic, OpenAI, Gemini, Groq, xAI); `LLM_BASE_URL` and `LLM_MODEL` override. Defaults exist only for OpenRouter and Anthropic, where the model names were verified; other providers must name a model. Tests use `FakeLLM` and never touch the network.
+- **Alternatives:** the Anthropic SDK (one provider only); LiteLLM (broader, but a large dependency for what is one HTTP call shape).
+- **Reason:** the user wants to paste any key and have it work, and later phases compare models (stability, ablations), so switching model must be a config change. Structured output is not delegated to provider features, which vary; the reply is validated with Pydantic and errors go back through the retry loop.
+- **Note:** on OpenRouter, requests are restricted to providers that do not store or train on prompts (`data_collection: deny`), and the real per-call cost is recorded. The key is kept out of `repr` and out of anything logged (`LLMConfig.public()`).
