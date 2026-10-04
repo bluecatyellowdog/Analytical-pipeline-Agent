@@ -150,7 +150,7 @@ class TestHandoff:
     def test_row_loss_is_a_share_of_raw_rows(self) -> None:
         handoff = factories.handoff()
         assert handoff.row_loss == pytest.approx(3 / 4_998)
-        assert handoff.column("beloeb").dtype == "float64"
+        assert handoff.column("beloeb").dtype == "DOUBLE"
 
     def test_schema_is_named_schema_on_the_wire(self) -> None:
         """Python cannot use `schema`, but the JSON contract should read naturally."""

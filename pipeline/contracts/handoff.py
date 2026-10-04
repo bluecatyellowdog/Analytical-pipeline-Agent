@@ -10,11 +10,18 @@ from datetime import datetime
 from pydantic import Field, model_validator
 
 from pipeline.contracts.common import Flag, Strict, utcnow
+from pipeline.contracts.diagnosis import ColumnRole, TargetType
 from pipeline.contracts.profile import DatasetProfile
 
 
 class ColumnSchema(Strict):
-    """The post-cleaning contract for one column."""
+    """The post-cleaning contract for one column: what it is, verified by Gate 2.
+
+    Describes what was delivered, not what was hoped for. Where the type differs
+    from what the diagnosis expected, `note` says why that was allowed. Later
+    stages re-check the data against these entries before using it
+    (`pipeline/checks/schema.py:validate_against_contract`).
+    """
 
     name: str
     dtype: str
@@ -27,6 +34,24 @@ class ColumnSchema(Strict):
     transformations: list[str] = Field(
         default_factory=list, description="op_ids that touched this column, in order."
     )
+    role: ColumnRole | None = Field(
+        default=None, description="From the diagnosis; None for columns cleaning added."
+    )
+    expected_type: TargetType | None = Field(
+        default=None, description="The clean type the diagnosis asked for."
+    )
+    unique: bool = Field(
+        default=False, description="Promised unique and never missing: the primary key."
+    )
+    note: str | None = Field(
+        default=None, description="Why the column differs from the diagnosis, when it may."
+    )
+
+    @model_validator(mode="after")
+    def _key_is_complete(self) -> ColumnSchema:
+        if self.unique and self.nullable:
+            raise ValueError(f"{self.name}: a unique key column cannot allow missing values")
+        return self
 
 
 class Handoff(Strict):
@@ -34,6 +59,11 @@ class Handoff(Strict):
 
     run_id: str
     table: str = Field(description="Table name in the DuckDB `clean` schema.")
+    data_file: str | None = Field(
+        default=None,
+        description="The clean data as Parquet, relative to the run folder; the table itself "
+        "only lives as long as the database it was built in.",
+    )
     source_table: str = Field(description="The raw table it derives from.")
 
     rows_raw: int

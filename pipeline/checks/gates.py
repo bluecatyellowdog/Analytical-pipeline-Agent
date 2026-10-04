@@ -9,11 +9,24 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from pipeline.contracts.audit import CheckResult, GateResult
+from pipeline.checks.schema import (
+    build_contract,
+    check_columns,
+    check_primary_key,
+    check_row_loss,
+    check_target,
+    check_types,
+    key_column,
+)
+from pipeline.contracts.audit import CheckResult, GateResult, OpRecord
+from pipeline.contracts.cleaning import CleaningPlan
 from pipeline.contracts.common import Flag, GateOutcome
-from pipeline.contracts.context_brief import ClaimResult
+from pipeline.contracts.context_brief import ClaimResult, ContextBrief
+from pipeline.contracts.diagnosis import Diagnosis
+from pipeline.contracts.handoff import ColumnSchema
 from pipeline.contracts.ingestion import LoadResult
 from pipeline.contracts.profile import DatasetProfile
+from pipeline.ingestion.raw import RawStore, RawTable
 from pipeline.ingestion.types import COVERAGE_THRESHOLD
 
 REJECT_RATE_WARN = 0.001
@@ -230,3 +243,46 @@ def _brief_claims(claim_results: Sequence[ClaimResult]) -> CheckResult:
             "n_not_checkable": len(unchecked),
         },
     )
+
+
+def gate_2_cleaning(
+    store: RawStore,
+    raw: RawTable,
+    *,
+    clean_table: str,
+    records: Sequence[OpRecord],
+    reconciliation: Sequence[CheckResult],
+    plan: CleaningPlan,
+    diagnosis: Diagnosis,
+    brief: ContextBrief,
+    null_tokens: dict[str, list[str]],
+    attempt: int = 1,
+) -> tuple[GateResult, list[ColumnSchema]]:
+    """Gate 2: is the clean data what the diagnosis said it should become?
+
+    Contract layer: types and columns against the diagnosis. Invariant layer:
+    primary key, target never imputed, row loss, plus every reconciliation check
+    the executor already ran (row accounting, cell diff, replay). Returns the
+    gate and the verified schema contract that travels with the handoff.
+    """
+    key = key_column(brief, diagnosis, raw.columns)
+    contract = build_contract(
+        store,
+        clean_table,
+        raw_columns=raw.columns,
+        records=records,
+        diagnosis=diagnosis,
+        key=key,
+    )
+    contract, types = check_types(contract, plan, diagnosis)
+    target = brief.target if brief.target in raw.columns else None
+    checks = [
+        types,
+        check_columns(contract, diagnosis, records),
+        check_primary_key(store, raw, clean_table, key, records),
+        check_target(store, raw, clean_table, target, records, null_tokens.get(target or "", [])),
+        check_row_loss(raw.n_rows, records),
+        *reconciliation,
+    ]
+    flags = [flag for record in records for flag in record.flags]
+    return build_gate("gate_2_cleaning", checks, flags=flags, attempt=attempt), contract

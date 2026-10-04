@@ -16,6 +16,9 @@ from pipeline.contracts.common import Flag
 from pipeline.ingestion.raw import quote_ident
 from pipeline.ops.base import OpContext, OpError, OpPlan, register, require_columns
 
+DEFAULT_NULL_TOKENS = ("", "NA", "N/A", "null", "none", "-", "?")
+"""What tokens_to_null treats as missing unless told otherwise; Gate 2 uses the same list."""
+
 BOOLEAN_TRUE = ("true", "yes", "ja", "y", "t", "1")
 BOOLEAN_FALSE = ("false", "no", "nej", "n", "f", "0")
 
@@ -253,7 +256,7 @@ def standardize_categories(ctx: OpContext, params: StandardizeCategoriesParams) 
 
 class TokensToNullParams(Params):
     columns: list[str] = Field(min_length=1)
-    tokens: list[str] = Field(default_factory=lambda: ["", "NA", "N/A", "null", "none", "-", "?"])
+    tokens: list[str] = Field(default_factory=lambda: list(DEFAULT_NULL_TOKENS))
     case_insensitive: bool = True
 
 
