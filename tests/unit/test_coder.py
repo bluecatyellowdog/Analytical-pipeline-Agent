@@ -24,6 +24,7 @@ from pipeline.agents.llm import FakeLLM
 from pipeline.contracts.cleaning import Decision
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.diagnosis import Diagnosis
+from pipeline.contracts.plan import FixRequest
 from pipeline.ingest import ingest
 from pipeline.ingestion.compact import compact_profile
 from pipeline.ingestion.loaders import load
@@ -306,3 +307,56 @@ class TestGate2InTheLoop:
         assert result.blocked
         assert len(result.attempts) == 3
         assert "schema_types_match_diagnosis" in str(result.attempts[-1].problems)
+
+
+class TestFixRequests:
+    FIX = FixRequest(
+        column="beloeb",
+        issue="replace 999 with missing",
+        suggested_op="replace_sentinel",
+        params={"column": "beloeb", "values": ["999.0"]},
+        reason="999 is a coded missing value",
+    )
+
+    def check(self, steps, skipped=()):
+        brief = ContextBrief(description="d", goal="g", target="beloeb")
+        plan = parse_reply(plan_json(steps, skipped))
+        return check_plan(plan, DIAGNOSIS, UNDECIDED, brief, fix_requests=[self.FIX])
+
+    def test_the_prompt_carries_the_fixes_and_the_previous_plan(self, profile_llm, brief) -> None:
+        previous = parse_reply(plan_json())
+        messages = build_messages(
+            profile_llm,
+            brief,
+            DIAGNOSIS,
+            UNDECIDED,
+            fix_requests=[self.FIX],
+            previous_plan=previous,
+        )
+        text = messages[-1]["content"]
+        assert "R1" in text and "replace 999 with missing" in text
+        assert "<previous_plan>" in text and "normalize_decimal" in text
+
+    def test_every_fix_must_be_addressed_or_skipped(self) -> None:
+        assert any("R1" in p for p in self.check(GOOD_STEPS))
+        sentinel = step("replace_sentinel", ["R1"], column="beloeb", values=["999.0"])
+        assert self.check([*GOOD_STEPS, sentinel]) == []
+        assert self.check(GOOD_STEPS, skipped=[{"id": "R1", "reason": "J1 is undecided"}]) == []
+
+    def test_a_fix_round_runs_like_any_plan(self, profile_llm, brief, store, raw) -> None:
+        sentinel = step("replace_sentinel", ["R1"], column="beloeb", values=["999.0"])
+        llm = FakeLLM([plan_json([*GOOD_STEPS, sentinel])])
+        result = write_and_run(
+            profile_llm,
+            brief,
+            DIAGNOSIS,
+            UNDECIDED,
+            llm,
+            store=store,
+            raw=raw,
+            run_id=RUN_ID,
+            fix_requests=[self.FIX],
+            previous_plan=parse_reply(plan_json()),
+        )
+        assert not result.blocked
+        assert store.column_values(result.run.clean_table, "beloeb").count(None) == 3

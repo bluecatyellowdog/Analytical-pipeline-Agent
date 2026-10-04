@@ -8,6 +8,7 @@ from pipeline.agents.llm import (
     FakeLLM,
     LLMConfigError,
     LLMResponse,
+    connect,
     detect_provider,
     load_config,
 )
@@ -85,3 +86,10 @@ class TestFakeLLM:
         fake = FakeLLM([])
         with pytest.raises(AssertionError):
             fake.complete([{"role": "user", "content": "hi"}])
+
+
+def test_connect_can_use_another_model_for_one_agent() -> None:
+    """The reviewer may run on a different model than the coder (LLM_REVIEW_MODEL)."""
+    client = connect({"LLM_API_KEY": "sk-or-v1-abc"}, model="openai/gpt-6-sol")
+    assert client.config.model == "openai/gpt-6-sol"
+    assert client.config.provider == "openrouter"

@@ -1,9 +1,11 @@
-"""The cleaning flow on a real run folder, with the LLM mocked.
+"""Stage 2 on a real run folder, with every LLM mocked.
 
-ingest -> analyst (writes decisions.yaml) -> the user decides -> coder (plans,
-runs, checks, writes clean data and a report). What is pinned down: the files a
-user is told to open exist and say what happened, the manifest records every
-agent and its cost, and the folder refuses to be cleaned when it should not be.
+ingest -> analyst (writes decisions.yaml) -> the user decides -> pipeline.clean:
+the coder plans and runs, Gate 2 checks, the reviewer judges and may send fixes
+back. What is pinned down: the files a user is told to open exist and say what
+happened, the manifest records every agent and its cost, the review loop ends
+the way the design says (accepted, flagged, budget, previous result kept), and
+the folder refuses to be cleaned when it should not be.
 """
 
 from __future__ import annotations
@@ -15,7 +17,9 @@ import duckdb
 import pytest
 import yaml
 
-from pipeline.agents import analyst, coder
+from pipeline import clean
+from pipeline.agents import analyst
+from pipeline.agents.coder import CoderError
 from pipeline.agents.decisions import DECISIONS_FILE, DecisionsError
 from pipeline.agents.llm import FakeLLM
 from pipeline.checks.schema import validate_against_contract
@@ -29,6 +33,44 @@ pytestmark = pytest.mark.e2e
 
 PROVIDER = {"provider": "fake"}
 SENTINEL = step("replace_sentinel", ["J1"], column="beloeb", values=["999.0"])
+CAST_ID = step("cast", ["I1"], column="kunde_id", to="integer")
+EMAIL_FIX = step("tokens_to_null", ["R1"], columns=["email"], tokens=["", "NA"])
+
+VERIFIED = [
+    {"claim": "No rows were lost.", "evidence": "12 raw = 12 clean"},
+    {"claim": "Ages parse as integers.", "evidence": "alder range 19..71"},
+]
+EMAIL_FINDING = {
+    "step": None,
+    "column": "email",
+    "severity": "error",
+    "problem": "Blank and NA emails are still text, not missing.",
+    "evidence": "null_tokens {'': 4, 'NA': 1}",
+    "fix": {
+        "column": "email",
+        "issue": "turn blank and NA emails into missing values",
+        "suggested_op": "tokens_to_null",
+        "params": {"columns": ["email"], "tokens": ["", "NA"]},
+        "reason": "they are null tokens",
+    },
+}
+
+
+def verdict(findings=(), ambiguities=(), accepted=True) -> str:
+    return json.dumps(
+        {
+            "verdict": {
+                "accepted": accepted,
+                "summary": "Reviewed.",
+                "verified": VERIFIED,
+                "findings": list(findings),
+                "ambiguities": list(ambiguities),
+            }
+        }
+    )
+
+
+REJECT = verdict(findings=[EMAIL_FINDING], accepted=False)
 
 
 @pytest.fixture
@@ -58,125 +100,223 @@ def decide(folder, **choices) -> None:
     path.write_text(yaml.safe_dump(entries, allow_unicode=True), encoding="utf-8")
 
 
-def test_the_whole_flow_writes_clean_data_and_a_report(run_dir) -> None:
-    folder, _ = run_dir
-    diagnose(folder)
-    template = yaml.safe_load((folder / DECISIONS_FILE).read_text(encoding="utf-8"))
-    assert template["J1"]["decision"] == "undecided"
-
-    decide(folder, J1="Treat 999 as missing")
-    llm = FakeLLM([plan_json([*GOOD_STEPS, SENTINEL])])
-    result = coder.run_on_folder(folder, llm, PROVIDER)
-    assert result.run.ok
-
-    for name in (
-        coder.CLEANING_PLAN,
-        coder.CLEANING_LOG,
-        coder.CODER_LOG,
-        coder.CLEANING_REPORT,
-        coder.CLEAN_PARQUET,
-        coder.CLEAN_CSV,
-        coder.GATE_2_FILE,
-        coder.HANDOFF_FILE,
-        coder.SCHEMA_CONTRACT_FILE,
-    ):
-        assert (folder / name).exists(), name
-
-    parquet = (folder / coder.CLEAN_PARQUET).as_posix()
-    rows, missing_amounts = duckdb.sql(
-        f"SELECT count(*), count(*) FILTER (WHERE beloeb IS NULL) FROM read_parquet('{parquet}')"
-    ).fetchone()
-    assert (rows, missing_amounts) == (12, 3)
-
-    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["stage_status"]["cleaning"] == "done"
-    assert set(manifest["models"]) == {"analyst", "coder"}
-    assert manifest["cost"]["calls"] == 2
-
-    report = (folder / coder.CLEANING_REPORT).read_text(encoding="utf-8")
-    assert "12 raw -> 12 clean" in report
-    assert "**Gate 2: PASS.**" in report or "**Gate 2: FLAG.**" in report
-    assert "**J1** decided by you: Treat 999 as missing" in report
-    assert "**J2** still open" in report
+def run_clean(folder, coder_replies, review_replies=None, **options):
+    reviewing = review_replies is not None
+    return clean.clean_folder(
+        folder,
+        FakeLLM(coder_replies),
+        PROVIDER,
+        review_client=FakeLLM(review_replies or []),
+        reviewing=reviewing,
+        **options,
+    )
 
 
-def test_the_coder_needs_a_diagnosis_first(run_dir) -> None:
-    folder, _ = run_dir
-    with pytest.raises(coder.RunFolderError, match="analyst"):
-        coder.run_on_folder(folder, FakeLLM([]), PROVIDER)
+def manifest_of(folder) -> dict:
+    return json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
 
 
-def test_a_source_file_that_changed_since_ingestion_is_refused(run_dir) -> None:
-    folder, source = run_dir
-    diagnose(folder)
-    with source.open("a", encoding="utf-8") as handle:
-        handle.write("99999;40;1.000,00;01-01-2022;\n")
-    with pytest.raises(coder.RunFolderError, match="changed"):
-        coder.run_on_folder(folder, FakeLLM([]), PROVIDER)
+def report_of(folder) -> str:
+    return (folder / clean.CLEANING_REPORT).read_text(encoding="utf-8")
 
 
-def test_decisions_for_unknown_calls_are_refused(run_dir) -> None:
-    folder, _ = run_dir
-    diagnose(folder)
-    (folder / DECISIONS_FILE).write_text("J9:\n  decision: yes\n", encoding="utf-8")
-    with pytest.raises(DecisionsError, match="J9"):
-        coder.run_on_folder(folder, FakeLLM([]), PROVIDER)
+class TestCleaning:
+    def test_the_whole_flow_writes_clean_data_and_a_report(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        template = yaml.safe_load((folder / DECISIONS_FILE).read_text(encoding="utf-8"))
+        assert template["J1"]["decision"] == "undecided"
+
+        decide(folder, J1="Treat 999 as missing")
+        outcome = run_clean(folder, [plan_json([*GOOD_STEPS, SENTINEL])])
+        assert outcome.status == "not_reviewed"
+
+        for name in (
+            clean.CLEANING_PLAN,
+            clean.CLEANING_LOG,
+            clean.CODER_LOG,
+            clean.CLEANING_REPORT,
+            clean.CLEAN_PARQUET,
+            clean.CLEAN_CSV,
+            clean.GATE_2_FILE,
+            clean.HANDOFF_FILE,
+            clean.SCHEMA_CONTRACT_FILE,
+        ):
+            assert (folder / name).exists(), name
+
+        parquet = (folder / clean.CLEAN_PARQUET).as_posix()
+        rows, missing_amounts = duckdb.sql(
+            "SELECT count(*), count(*) FILTER (WHERE beloeb IS NULL) "
+            f"FROM read_parquet('{parquet}')"
+        ).fetchone()
+        assert (rows, missing_amounts) == (12, 3)
+
+        manifest = manifest_of(folder)
+        assert manifest["stage_status"]["cleaning"] == "done"
+        assert set(manifest["models"]) == {"analyst", "coder"}
+        assert manifest["cost"]["calls"] == 2
+
+        report = report_of(folder)
+        assert "12 raw -> 12 clean" in report
+        assert "**Gate 2: PASS.**" in report or "**Gate 2: FLAG.**" in report
+        assert "**Review: NOT_REVIEWED.**" in report
+        assert "**J1** decided by you: Treat 999 as missing" in report
+        assert "**J2** still open" in report
+
+    def test_the_clean_data_file_matches_its_handoff_contract(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        run_clean(folder, [plan_json()])
+
+        handoff = Handoff.model_validate_json(
+            (folder / clean.HANDOFF_FILE).read_text(encoding="utf-8")
+        )
+        assert handoff.data_file == clean.CLEAN_PARQUET
+        assert handoff.column("kunde_id").unique
+        assert handoff.profile is not None and handoff.profile.n_rows == 12
+        data = (folder / handoff.data_file).as_posix()
+        checks = validate_against_contract(
+            duckdb.connect(), f"read_parquet('{data}')", handoff.schema_
+        )
+        assert all(c.passed for c in checks), [c.message for c in checks if not c.passed]
+
+    def test_a_blocked_rerun_leaves_no_stale_clean_data_behind(self, run_dir) -> None:
+        """A good run, then a blocked one: the old handoff must not survive to mislead Stage 3."""
+        folder, _ = run_dir
+        diagnose(folder)
+        run_clean(folder, [plan_json()])
+        assert (folder / clean.HANDOFF_FILE).exists()
+
+        blocked = plan_json([*GOOD_STEPS, CAST_ID])
+        outcome = run_clean(folder, [blocked, blocked, blocked])
+
+        assert outcome.result.blocked and outcome.status == "blocked"
+        for name in clean.DELIVERABLES:
+            assert not (folder / name).exists(), name
+        assert (folder / clean.GATE_2_FILE).exists()
+        report = report_of(folder)
+        assert "**Gate 2: BLOCK.**" in report and "kunde_id" in report
+        assert manifest_of(folder)["stage_status"]["cleaning"] == "blocked"
 
 
-def test_running_the_analyst_again_keeps_the_users_decisions(run_dir) -> None:
-    folder, _ = run_dir
-    diagnose(folder)
-    decide(folder, J1="Keep 999")
-    diagnose(folder)
-    assert "Keep 999" in (folder / DECISIONS_FILE).read_text(encoding="utf-8")
+class TestReview:
+    def test_an_accepted_review(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        outcome = run_clean(folder, [plan_json()], [verdict()])
+
+        assert outcome.status == "accepted"
+        assert len(outcome.reviews) == 1
+        manifest = manifest_of(folder)
+        assert manifest["stage_status"]["review"] == "accepted"
+        assert {"coder", "reviewer"} <= set(manifest["models"])
+        log = json.loads((folder / clean.REVIEW_LOG).read_text(encoding="utf-8"))
+        assert log["rounds"][0]["accepted"] is True
+        assert "**Review: ACCEPTED.**" in report_of(folder)
+
+    def test_a_fix_goes_back_to_the_coder_and_is_applied(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        coder_replies = [plan_json(), plan_json([*GOOD_STEPS, EMAIL_FIX])]
+        outcome = run_clean(folder, coder_replies, [REJECT, verdict()])
+
+        assert outcome.status == "accepted"
+        assert len(outcome.reviews) == 2
+        assert not outcome.reviews[0].verdict.accepted
+        parquet = (folder / clean.CLEAN_PARQUET).as_posix()
+        missing_emails = duckdb.sql(
+            f"SELECT count(*) FILTER (WHERE email IS NULL) FROM read_parquet('{parquet}')"
+        ).fetchone()[0]
+        assert missing_emails == 5
+        assert "Round 1: sent back with 1 fix request(s)" in report_of(folder)
+
+    def test_a_reviewer_that_keeps_rejecting_ends_flagged(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        coder_replies = [plan_json(), plan_json([*GOOD_STEPS, EMAIL_FIX])] + [
+            plan_json([*GOOD_STEPS, EMAIL_FIX])
+        ]
+        outcome = run_clean(folder, coder_replies, [REJECT, REJECT, REJECT])
+
+        assert outcome.status == "flagged"
+        assert len(outcome.reviews) == 3
+        report = report_of(folder)
+        assert "For you to look at" in report and "Unresolved fix request" in report
+        assert (folder / clean.HANDOFF_FILE).exists()
+
+    def test_ambiguities_are_reported_to_the_user(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        question = {
+            "column": "beloeb",
+            "question": "Does 999 mean unknown in every year?",
+            "evidence": "999 appears 3 times",
+        }
+        outcome = run_clean(folder, [plan_json()], [verdict(ambiguities=[question])])
+
+        assert outcome.status == "accepted"
+        assert "Does 999 mean unknown in every year?" in report_of(folder)
+        handoff = json.loads((folder / clean.HANDOFF_FILE).read_text(encoding="utf-8"))
+        assert any(f["code"] == "review_ambiguity" for f in handoff["flags"])
+
+    def test_the_budget_stops_the_loop_between_rounds(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        outcome = run_clean(folder, [plan_json()], [REJECT], budget_usd=0.0)
+
+        assert outcome.status == "flagged"
+        assert len(outcome.reviews) == 1
+        assert any("budget" in note for note in outcome.notes)
+
+    def test_fixes_that_break_gate_2_keep_the_previous_result(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        breaking = plan_json([*GOOD_STEPS, EMAIL_FIX, CAST_ID])
+        outcome = run_clean(folder, [plan_json(), breaking, breaking, breaking], [REJECT])
+
+        assert outcome.status == "flagged"
+        assert not outcome.result.blocked
+        assert any("previous result is kept" in note for note in outcome.notes)
+        handoff = Handoff.model_validate_json(
+            (folder / clean.HANDOFF_FILE).read_text(encoding="utf-8")
+        )
+        assert handoff.column("kunde_id").dtype == "VARCHAR"
 
 
-def test_a_failed_coder_marks_the_stage_blocked_and_logs_every_attempt(run_dir) -> None:
-    folder, _ = run_dir
-    diagnose(folder)
-    with pytest.raises(coder.CoderError):
-        coder.run_on_folder(folder, FakeLLM(["no", "no", "no"]), PROVIDER)
+class TestRefusals:
+    def test_cleaning_needs_a_diagnosis_first(self, run_dir) -> None:
+        folder, _ = run_dir
+        with pytest.raises(clean.RunFolderError, match="analyst"):
+            run_clean(folder, [])
 
-    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["stage_status"]["cleaning"] == "blocked"
-    log = json.loads((folder / coder.CODER_LOG).read_text(encoding="utf-8"))
-    assert len(log["attempts"]) == 3
+    def test_a_source_file_that_changed_since_ingestion_is_refused(self, run_dir) -> None:
+        folder, source = run_dir
+        diagnose(folder)
+        with source.open("a", encoding="utf-8") as handle:
+            handle.write("99999;40;1.000,00;01-01-2022;\n")
+        with pytest.raises(clean.RunFolderError, match="changed"):
+            run_clean(folder, [])
 
+    def test_decisions_for_unknown_calls_are_refused(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        (folder / DECISIONS_FILE).write_text("J9:\n  decision: yes\n", encoding="utf-8")
+        with pytest.raises(DecisionsError, match="J9"):
+            run_clean(folder, [])
 
-def test_the_clean_data_file_matches_its_handoff_contract(run_dir) -> None:
-    folder, _ = run_dir
-    diagnose(folder)
-    coder.run_on_folder(folder, FakeLLM([plan_json()]), PROVIDER)
+    def test_running_the_analyst_again_keeps_the_users_decisions(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        decide(folder, J1="Keep 999")
+        diagnose(folder)
+        assert "Keep 999" in (folder / DECISIONS_FILE).read_text(encoding="utf-8")
 
-    handoff = Handoff.model_validate_json((folder / coder.HANDOFF_FILE).read_text(encoding="utf-8"))
-    assert handoff.data_file == coder.CLEAN_PARQUET
-    assert handoff.column("kunde_id").unique
-    data = (folder / handoff.data_file).as_posix()
-    checks = validate_against_contract(duckdb.connect(), f"read_parquet('{data}')", handoff.schema_)
-    assert all(c.passed for c in checks), [c.message for c in checks if not c.passed]
+    def test_a_failed_coder_marks_the_stage_blocked_and_logs_every_attempt(self, run_dir) -> None:
+        folder, _ = run_dir
+        diagnose(folder)
+        with pytest.raises(CoderError):
+            run_clean(folder, ["no", "no", "no"])
 
-
-def test_a_blocked_rerun_leaves_no_stale_clean_data_behind(run_dir) -> None:
-    """A good run, then a blocked one: the old handoff must not survive to mislead Stage 3."""
-    folder, _ = run_dir
-    diagnose(folder)
-    coder.run_on_folder(folder, FakeLLM([plan_json()]), PROVIDER)
-    assert (folder / coder.HANDOFF_FILE).exists()
-
-    cast_id = step("cast", ["I1"], column="kunde_id", to="integer")
-    blocked = plan_json([*GOOD_STEPS, cast_id])
-    result = coder.run_on_folder(folder, FakeLLM([blocked, blocked, blocked]), PROVIDER)
-
-    assert result.blocked
-    for name in (
-        coder.HANDOFF_FILE,
-        coder.CLEAN_PARQUET,
-        coder.CLEAN_CSV,
-        coder.SCHEMA_CONTRACT_FILE,
-    ):
-        assert not (folder / name).exists(), name
-    assert (folder / coder.GATE_2_FILE).exists()
-    report = (folder / coder.CLEANING_REPORT).read_text(encoding="utf-8")
-    assert "**Gate 2: BLOCK.**" in report and "kunde_id" in report
-    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["stage_status"]["cleaning"] == "blocked"
+        assert manifest_of(folder)["stage_status"]["cleaning"] == "blocked"
+        log = json.loads((folder / clean.CODER_LOG).read_text(encoding="utf-8"))
+        assert len(log["attempts"]) == 3

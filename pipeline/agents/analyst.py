@@ -302,8 +302,8 @@ def main(argv: list[str] | None = None) -> int:
     if result.diagnosis.judgment_calls:
         print(
             f"Decide the {len(result.diagnosis.judgment_calls)} judgment call(s) in "
-            f"{(run_dir / DECISIONS_FILE).resolve()}, then run the coder:\n"
-            f"  uv run python -m pipeline.agents.coder {run_dir.as_posix()}"
+            f"{(run_dir / DECISIONS_FILE).resolve()}, then clean the data:\n"
+            f"  uv run python -m pipeline.clean {run_dir.as_posix()}"
         )
     return 0
 

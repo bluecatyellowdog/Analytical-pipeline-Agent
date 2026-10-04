@@ -26,7 +26,7 @@ Clean it with the agents. Put any LLM API key in `.env` first (see [.env.example
 ```powershell
 uv run python -m pipeline.agents.analyst runs/<run folder>   # diagnosis.md + decisions.yaml
 # decide the judgment calls in decisions.yaml (or leave them undecided)
-uv run python -m pipeline.agents.coder runs/<run folder>     # cleaning_report.md, clean data, handoff.json
+uv run python -m pipeline.clean runs/<run folder>            # coder -> Gate 2 -> reviewer; report, clean data, handoff.json
 ```
 
 ## Status
@@ -35,7 +35,7 @@ uv run python -m pipeline.agents.coder runs/<run folder>     # cleaning_report.m
 | --- | --- |
 | 0 — Contracts & setup | Done, minus tracing and the Pages workflow |
 | 1 — Deterministic foundation | Done |
-| 2 — Cleaning agent | In progress: analyst, coder and Gate 2 run end to end; the reviewer and canary rows remain |
+| 2 — Cleaning agent | In progress: analyst, coder, Gate 2 and reviewer run end to end; canary rows and the 5-dataset exit run remain |
 | 3–7 | Not started |
 
 Phase 1's exit criteria are met: a dataset can be cleaned by hand through the op library with a complete audit log, and replay and row accounting pass.
@@ -45,7 +45,9 @@ Phase 1's exit criteria are met: a dataset can be cleaned by hand through the op
 - **[pipeline/contracts/](pipeline/contracts/)** — every stage boundary as a Pydantic model. The validators enforce audit invariants at construction: row accounting must balance, a rejected review must carry a fix request, an artifact without audit references cannot be built.
 - **[pipeline/ingestion/](pipeline/ingestion/)** — detection, loaders, the immutable raw layer, type inference, profiling, PII detection and masking, claim verification, and the compact LLM profile.
 - **[pipeline/ops/](pipeline/ops/)** — 15 library operations, the `custom_code` op for agent-written pandas code (run in a sandboxed process), and the executor that audits both. Nothing changes data outside this package.
-- **[pipeline/agents/](pipeline/agents/)** — the LLM client (any OpenAI-compatible provider, one key), the analyst (masked profile + brief → diagnosis with judgment calls) and the coder (diagnosis + your decisions → a cleaning plan, run and checked by [pipeline/ops/plan.py](pipeline/ops/plan.py)). Every attempt, reply, cost and prompt version is logged.
+- **[pipeline/agents/](pipeline/agents/)** — the LLM client (any OpenAI-compatible provider, one key), the analyst (masked profile + brief → diagnosis with judgment calls), the coder (diagnosis + your decisions → a cleaning plan, run and checked by [pipeline/ops/plan.py](pipeline/ops/plan.py)) and the reviewer (evidence + its own aggregate queries → a grounded verdict, fix requests, questions for you). Every attempt, reply, query, cost and prompt version is logged.
+- **[pipeline/clean.py](pipeline/clean.py)** — Stage 2 end to end: coder, Gate 2, reviewer, at most two loop-backs, a per-run budget, and every output in the run folder.
+- **[pipeline/tools/queries.py](pipeline/tools/queries.py)** — the reviewer's query tool: five aggregate question kinds, no SQL from the model, personal values masked inside the query.
 - **[pipeline/checks/](pipeline/checks/)** — Gates 1 and 2, the reconciliation checks (row accounting, cell diff, untouched-column comparison, distribution shift, replay against the output hash) and the schema contract that travels with the clean data ([schema.py](pipeline/checks/schema.py)).
 - **[tests/fixtures/](tests/fixtures/)** — the ten deliberately nasty files from spec 4.5, with their expected results written out in [expected.yaml](tests/fixtures/expected.yaml). That file is the specification the loaders are tested against.
 
@@ -62,8 +64,11 @@ Phase 1's exit criteria are met: a dataset can be cleaned by hand through the op
 | An LLM never settles a judgment call | The coder may act only on calls decided in `decisions.yaml`; `agents/coder.py` refuses a plan that touches an undecided one |
 | The target is never imputed or dropped | Checked on the plan before it runs, on the data after every step (`ops/plan.py`), and against raw at Gate 2, which also catches a null token turned straight into a value |
 | Clean data is what the diagnosis said it would be | Gate 2's schema contract (`checks/schema.py`): types, columns, primary key; later stages re-check the data file against the saved contract |
+| The reviewer never sees a row or a personal value | `tools/queries.py` answers only aggregates, masks personal and ID values in the query itself and refuses to filter on them; the evidence pack is built from logs and masked profiles |
+| Review claims are grounded | `agents/reviewer.py` drops any claim whose numbers appear nowhere in what the reviewer was shown, derives `accepted` from its fix requests, and requires two verified checks |
+| Ambiguities go to the user | The reviewer reports them; nothing it says can change a decision or a judgment call |
 | Blocked data is never handed on | Clean data, `handoff.json` and the contract are written only when Gate 2 does not block, and old copies are removed first |
 
 ## Next
 
-The rest of Phase 2: the reviewer (an LLM that judges whether the cleaning is right, not just accounted for, and sends fix requests back to the coder), canary rows, and a profile of the clean data for the reviewer to read.
+The rest of Phase 2: canary rows (synthetic rows with known correct outputs, checked on every run), then the exit run on five clean public datasets. After that, Phase 3: the corruption benchmark that measures the agents, including whether the reviewer catches anything (`--no-review` is the ablation).

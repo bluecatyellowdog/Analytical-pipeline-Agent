@@ -24,7 +24,7 @@ HEADER = """\
 # or write your own in plain words. Calls left `undecided` are not touched by
 # the cleaning; they stay flagged in the report.
 #
-# Then run:  uv run python -m pipeline.agents.coder <this run folder>
+# Then run:  uv run python -m pipeline.clean <this run folder>
 
 """
 

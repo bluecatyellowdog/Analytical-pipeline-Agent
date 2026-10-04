@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 Message = dict[str, str]
@@ -170,9 +170,14 @@ class FakeLLM:
         return LLMResponse(text=self._replies.pop(0), model=self.model)
 
 
-def connect(env: Mapping[str, str] | None = None) -> OpenAICompatibleClient:
-    """A client for whatever key is configured."""
-    return OpenAICompatibleClient(load_config(env))
+def connect(
+    env: Mapping[str, str] | None = None, *, model: str | None = None
+) -> OpenAICompatibleClient:
+    """A client for whatever key is configured; `model` overrides the configured model."""
+    config = load_config(env)
+    if model:
+        config = replace(config, model=model)
+    return OpenAICompatibleClient(config)
 
 
 def main() -> int:
