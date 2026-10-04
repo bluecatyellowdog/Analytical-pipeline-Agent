@@ -18,7 +18,9 @@ import yaml
 from pipeline.agents import analyst, coder
 from pipeline.agents.decisions import DECISIONS_FILE, DecisionsError
 from pipeline.agents.llm import FakeLLM
+from pipeline.checks.schema import validate_against_contract
 from pipeline.contracts.context_brief import ContextBrief
+from pipeline.contracts.handoff import Handoff
 from pipeline.ingest import ingest
 from pipeline.ingestion.raw import RawStore
 from tests.unit.test_coder import DIAGNOSIS, GOOD_STEPS, plan_json, step
@@ -74,6 +76,9 @@ def test_the_whole_flow_writes_clean_data_and_a_report(run_dir) -> None:
         coder.CLEANING_REPORT,
         coder.CLEAN_PARQUET,
         coder.CLEAN_CSV,
+        coder.GATE_2_FILE,
+        coder.HANDOFF_FILE,
+        coder.SCHEMA_CONTRACT_FILE,
     ):
         assert (folder / name).exists(), name
 
@@ -90,6 +95,7 @@ def test_the_whole_flow_writes_clean_data_and_a_report(run_dir) -> None:
 
     report = (folder / coder.CLEANING_REPORT).read_text(encoding="utf-8")
     assert "12 raw -> 12 clean" in report
+    assert "**Gate 2: PASS.**" in report or "**Gate 2: FLAG.**" in report
     assert "**J1** decided by you: Treat 999 as missing" in report
     assert "**J2** still open" in report
 
@@ -135,3 +141,42 @@ def test_a_failed_coder_marks_the_stage_blocked_and_logs_every_attempt(run_dir) 
     assert manifest["stage_status"]["cleaning"] == "blocked"
     log = json.loads((folder / coder.CODER_LOG).read_text(encoding="utf-8"))
     assert len(log["attempts"]) == 3
+
+
+def test_the_clean_data_file_matches_its_handoff_contract(run_dir) -> None:
+    folder, _ = run_dir
+    diagnose(folder)
+    coder.run_on_folder(folder, FakeLLM([plan_json()]), PROVIDER)
+
+    handoff = Handoff.model_validate_json((folder / coder.HANDOFF_FILE).read_text(encoding="utf-8"))
+    assert handoff.data_file == coder.CLEAN_PARQUET
+    assert handoff.column("kunde_id").unique
+    data = (folder / handoff.data_file).as_posix()
+    checks = validate_against_contract(duckdb.connect(), f"read_parquet('{data}')", handoff.schema_)
+    assert all(c.passed for c in checks), [c.message for c in checks if not c.passed]
+
+
+def test_a_blocked_rerun_leaves_no_stale_clean_data_behind(run_dir) -> None:
+    """A good run, then a blocked one: the old handoff must not survive to mislead Stage 3."""
+    folder, _ = run_dir
+    diagnose(folder)
+    coder.run_on_folder(folder, FakeLLM([plan_json()]), PROVIDER)
+    assert (folder / coder.HANDOFF_FILE).exists()
+
+    cast_id = step("cast", ["I1"], column="kunde_id", to="integer")
+    blocked = plan_json([*GOOD_STEPS, cast_id])
+    result = coder.run_on_folder(folder, FakeLLM([blocked, blocked, blocked]), PROVIDER)
+
+    assert result.blocked
+    for name in (
+        coder.HANDOFF_FILE,
+        coder.CLEAN_PARQUET,
+        coder.CLEAN_CSV,
+        coder.SCHEMA_CONTRACT_FILE,
+    ):
+        assert not (folder / name).exists(), name
+    assert (folder / coder.GATE_2_FILE).exists()
+    report = (folder / coder.CLEANING_REPORT).read_text(encoding="utf-8")
+    assert "**Gate 2: BLOCK.**" in report and "kunde_id" in report
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["stage_status"]["cleaning"] == "blocked"

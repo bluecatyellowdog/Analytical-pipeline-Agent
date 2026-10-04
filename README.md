@@ -26,7 +26,7 @@ Clean it with the agents. Put any LLM API key in `.env` first (see [.env.example
 ```powershell
 uv run python -m pipeline.agents.analyst runs/<run folder>   # diagnosis.md + decisions.yaml
 # decide the judgment calls in decisions.yaml (or leave them undecided)
-uv run python -m pipeline.agents.coder runs/<run folder>     # cleaning_report.md + clean_data.csv
+uv run python -m pipeline.agents.coder runs/<run folder>     # cleaning_report.md, clean data, handoff.json
 ```
 
 ## Status
@@ -35,7 +35,7 @@ uv run python -m pipeline.agents.coder runs/<run folder>     # cleaning_report.m
 | --- | --- |
 | 0 — Contracts & setup | Done, minus tracing and the Pages workflow |
 | 1 — Deterministic foundation | Done |
-| 2 — Cleaning agent | In progress: analyst and coder agents run end to end; Gate 2, canary rows and the reviewer remain |
+| 2 — Cleaning agent | In progress: analyst, coder and Gate 2 run end to end; the reviewer and canary rows remain |
 | 3–7 | Not started |
 
 Phase 1's exit criteria are met: a dataset can be cleaned by hand through the op library with a complete audit log, and replay and row accounting pass.
@@ -46,7 +46,7 @@ Phase 1's exit criteria are met: a dataset can be cleaned by hand through the op
 - **[pipeline/ingestion/](pipeline/ingestion/)** — detection, loaders, the immutable raw layer, type inference, profiling, PII detection and masking, claim verification, and the compact LLM profile.
 - **[pipeline/ops/](pipeline/ops/)** — 15 library operations, the `custom_code` op for agent-written pandas code (run in a sandboxed process), and the executor that audits both. Nothing changes data outside this package.
 - **[pipeline/agents/](pipeline/agents/)** — the LLM client (any OpenAI-compatible provider, one key), the analyst (masked profile + brief → diagnosis with judgment calls) and the coder (diagnosis + your decisions → a cleaning plan, run and checked by [pipeline/ops/plan.py](pipeline/ops/plan.py)). Every attempt, reply, cost and prompt version is logged.
-- **[pipeline/checks/](pipeline/checks/)** — Gate 1 and the reconciliation checks: row accounting, cell diff, untouched-column comparison, distribution shift, and replay against the output hash.
+- **[pipeline/checks/](pipeline/checks/)** — Gates 1 and 2, the reconciliation checks (row accounting, cell diff, untouched-column comparison, distribution shift, replay against the output hash) and the schema contract that travels with the clean data ([schema.py](pipeline/checks/schema.py)).
 - **[tests/fixtures/](tests/fixtures/)** — the ten deliberately nasty files from spec 4.5, with their expected results written out in [expected.yaml](tests/fixtures/expected.yaml). That file is the specification the loaders are tested against.
 
 ## The guarantees, and where they are enforced
@@ -60,8 +60,10 @@ Phase 1's exit criteria are met: a dataset can be cleaned by hand through the op
 | Every change is accounted for | `checks/reconciliation.py`, including replay from raw |
 | The LLM never sees raw rows or personal data | `ingestion/compact.py`, with tests asserting no personal value reaches the profile or any prompt; error messages sent back to an LLM are masked by `agents/feedback.py` |
 | An LLM never settles a judgment call | The coder may act only on calls decided in `decisions.yaml`; `agents/coder.py` refuses a plan that touches an undecided one |
-| The target is never imputed or dropped | Checked on the plan before it runs and on the data after every step (`ops/plan.py`) |
+| The target is never imputed or dropped | Checked on the plan before it runs, on the data after every step (`ops/plan.py`), and against raw at Gate 2, which also catches a null token turned straight into a value |
+| Clean data is what the diagnosis said it would be | Gate 2's schema contract (`checks/schema.py`): types, columns, primary key; later stages re-check the data file against the saved contract |
+| Blocked data is never handed on | Clean data, `handoff.json` and the contract are written only when Gate 2 does not block, and old copies are removed first |
 
 ## Next
 
-The rest of Phase 2: Gate 2 on the cleaned data (schema contract, row-loss thresholds, primary key intact), canary rows, a reviewer step, and the handoff JSON for Stage 3.
+The rest of Phase 2: the reviewer (an LLM that judges whether the cleaning is right, not just accounted for, and sends fix requests back to the coder), canary rows, and a profile of the clean data for the reviewer to read.

@@ -284,3 +284,25 @@ class TestWriteAndRun:
         result = run(llm, profile_llm, brief, store, raw, decisions=J1_DECIDED)
         assert result.run.ok
         assert store.column_values(result.run.clean_table, "beloeb").count(None) == 3
+
+
+class TestGate2InTheLoop:
+    CAST_ID = step("cast", ["I1"], column="kunde_id", to="integer")
+
+    def test_a_gate_2_failure_goes_back_to_the_coder(self, profile_llm, brief, store, raw) -> None:
+        llm = FakeLLM([plan_json([*GOOD_STEPS, self.CAST_ID]), plan_json()])
+        result = run(llm, profile_llm, brief, store, raw)
+
+        assert not result.blocked
+        assert len(result.attempts) == 2
+        sent_back = llm.calls[1][-1]["content"]
+        assert "Gate 2" in sent_back and "kunde_id" in sent_back
+
+    def test_a_result_that_stays_blocked_is_reported_not_lost(
+        self, profile_llm, brief, store, raw
+    ) -> None:
+        blocked = plan_json([*GOOD_STEPS, self.CAST_ID])
+        result = run(FakeLLM([blocked, blocked, blocked]), profile_llm, brief, store, raw)
+        assert result.blocked
+        assert len(result.attempts) == 3
+        assert "schema_types_match_diagnosis" in str(result.attempts[-1].problems)

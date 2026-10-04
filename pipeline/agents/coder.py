@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic import ValidationError
 
 from pipeline.agents.analyst import DIAGNOSIS_JSON
@@ -42,9 +43,12 @@ from pipeline.agents.common import (
 from pipeline.agents.decisions import DECISIONS_FILE, DecisionsError, load_decisions
 from pipeline.agents.feedback import mask_feedback
 from pipeline.agents.llm import LLMClient, LLMConfigError, Message, connect
+from pipeline.checks.gates import gate_2_cleaning
+from pipeline.contracts.audit import GateResult
 from pipeline.contracts.cleaning import CleaningPlan, Decision
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.diagnosis import Diagnosis
+from pipeline.contracts.handoff import ColumnSchema, Handoff
 from pipeline.ingestion.loaders import load
 from pipeline.ingestion.raw import ROW_ID, RawStore, RawTable, quote_ident
 from pipeline.ops import REGISTRY, op_names
@@ -58,6 +62,11 @@ CLEANING_REPORT = "cleaning_report.md"
 CLEAN_PARQUET = "clean_data.parquet"
 CLEAN_CSV = "clean_data.csv"
 DROPPED_CSV = "dropped_rows.csv"
+GATE_2_FILE = "gate_2.json"
+HANDOFF_FILE = "handoff.json"
+SCHEMA_CONTRACT_FILE = "schema_contract.yaml"
+DELIVERABLES = (CLEAN_PARQUET, CLEAN_CSV, DROPPED_CSV, HANDOFF_FILE, SCHEMA_CONTRACT_FILE)
+"""Written only for a result Gate 2 let through; cleared first, so none is ever stale."""
 
 
 class CoderError(RuntimeError):
@@ -78,10 +87,16 @@ class CoderResult:
     run: PlanRun
     attempts: list[Attempt]
     prompt_version: str
+    gate: GateResult
+    contract: list[ColumnSchema]
 
     @property
     def cost_usd(self) -> float:
         return total_cost(self.attempts)
+
+    @property
+    def blocked(self) -> bool:
+        return self.gate.outcome == "block"
 
 
 # -- prompt -----------------------------------------------------------------
@@ -245,10 +260,17 @@ def write_and_run(
     run_id: str,
     max_retries: int = MAX_RETRIES,
 ) -> CoderResult:
-    """Ask for a plan, check it, run it; send problems back until one runs cleanly."""
+    """Ask for a plan, check it, run it, gate it; send problems back until one is usable.
+
+    A result Gate 2 blocks goes back to the model like a refused step. If no
+    attempt ends fully clean, the best one is kept: one that only drew warnings,
+    otherwise one Gate 2 blocked, so the report can say exactly why. Only when no
+    plan ran at all is there nothing to report but the attempts.
+    """
     version = prompt_version()
     messages = build_messages(profile_llm, brief, diagnosis, decisions)
     protected = [brief.target] if brief.target and brief.target in raw.columns else []
+    null_tokens = {c["name"]: list(c.get("null_tokens") or {}) for c in profile_llm["columns"]}
     keep = (
         set(raw.columns)
         | set(op_names())
@@ -256,8 +278,29 @@ def write_and_run(
         | {j.id for j in diagnosis.judgment_calls}
     )
     attempts: list[Attempt] = []
-    fallback: CleaningPlan | None = None
+    with_warnings: CleaningPlan | None = None
+    gate_blocked: CleaningPlan | None = None
     last = max_retries + 1
+
+    def run_and_gate(
+        plan: CleaningPlan, number: int
+    ) -> tuple[PlanRun, GateResult | None, list[ColumnSchema]]:
+        run = execute_plan(store, raw, plan, run_id=run_id, protected=protected)
+        if not run.ok:
+            return run, None, []
+        gate, contract = gate_2_cleaning(
+            store,
+            raw,
+            clean_table=run.clean_table,
+            records=run.records,
+            reconciliation=run.checks,
+            plan=plan,
+            diagnosis=diagnosis,
+            brief=brief,
+            null_tokens=null_tokens,
+            attempt=number,
+        )
+        return run, gate, contract
 
     for number in range(1, last + 1):
         response, attempt = ask(client, messages, number)
@@ -271,13 +314,15 @@ def write_and_run(
         else:
             attempt.problems = check_plan(plan, diagnosis, decisions, brief)
             if not attempt.problems:
-                run = execute_plan(store, raw, plan, run_id=run_id, protected=protected)
-                attempt.problems = list(run.problems)
+                run, gate, contract = run_and_gate(plan, number)
                 attempt.warnings = list(run.warnings)
-                if run.ok and (not run.warnings or number == last):
-                    return CoderResult(plan, run, attempts, version)
-                if run.ok:
-                    fallback = plan
+                attempt.problems = list(run.problems) + _gate_problems(gate)
+                if gate is not None and gate.outcome != "block":
+                    if not run.warnings or number == last:
+                        return CoderResult(plan, run, attempts, version, gate, contract)
+                    with_warnings = plan
+                elif gate is not None:
+                    gate_blocked = plan
 
         if number == last:
             break
@@ -288,16 +333,27 @@ def write_and_run(
             {"role": "user", "content": attempt.feedback},
         ]
 
-    if fallback is not None:
-        run = execute_plan(store, raw, fallback, run_id=run_id, protected=protected)
-        if run.ok:
-            return CoderResult(fallback, run, attempts, version)
+    for candidate in (with_warnings, gate_blocked):
+        if candidate is not None:
+            run, gate, contract = run_and_gate(candidate, len(attempts))
+            if gate is not None:
+                return CoderResult(candidate, run, attempts, version, gate, contract)
 
     raise CoderError(
-        f"no cleaning plan ran cleanly after {len(attempts)} attempts; "
+        f"no cleaning plan ran after {len(attempts)} attempts; "
         f"last problems: {attempts[-1].problems}",
         attempts,
     )
+
+
+def _gate_problems(gate: GateResult | None) -> list[str]:
+    if gate is None:
+        return []
+    return [
+        f"Gate 2 check {c.name} failed: {c.message}"
+        for c in gate.checks
+        if not c.passed and c.severity == "block"
+    ]
 
 
 def _feedback(attempt: Attempt, run: PlanRun | None, reply: str, keep: set[str]) -> str:
@@ -378,10 +434,10 @@ def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) ->
             save_manifest(run_dir, manifest)
             raise
 
-        _write_outputs(run_dir, store, raw, result, diagnosis, decisions)
+        _write_outputs(run_dir, store, raw, result, diagnosis, decisions, run_id=manifest.run_id)
 
     record_in_manifest(manifest, "coder", provider, result.attempts, result.prompt_version)
-    manifest.stage_status["cleaning"] = "done"
+    manifest.stage_status["cleaning"] = "blocked" if result.blocked else "done"
     save_manifest(run_dir, manifest)
     return result
 
@@ -393,36 +449,31 @@ def _write_outputs(
     result: CoderResult,
     diagnosis: Diagnosis,
     decisions: list[Decision],
+    *,
+    run_id: str,
 ) -> None:
-    run = result.run
+    """The logs and the report always; clean data, handoff and contract only past Gate 2."""
+    for name in DELIVERABLES:
+        (run_dir / name).unlink(missing_ok=True)
+
+    run, gate = result.run, result.gate
+    rows_clean = store.row_count(run.clean_table)
     (run_dir / CLEANING_PLAN).write_text(result.plan.model_dump_json(indent=2), encoding="utf-8")
     log = {
         "raw_table": raw.name,
         "clean_table": run.clean_table,
         "rows_raw": raw.n_rows,
-        "rows_clean": store.row_count(run.clean_table),
+        "rows_clean": rows_clean,
         "warnings": run.warnings,
         "records": [r.model_dump(mode="json") for r in run.records],
-        "checks": [c.model_dump(mode="json") for c in run.checks],
+        "gate_2": gate.model_dump(mode="json"),
     }
     (run_dir / CLEANING_LOG).write_text(
         json.dumps(log, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     write_attempt_log(run_dir / CODER_LOG, result.attempts, result.prompt_version)
+    (run_dir / GATE_2_FILE).write_text(gate.model_dump_json(indent=2), encoding="utf-8")
 
-    clean = _qualified(run.clean_table)
-    _copy(
-        store,
-        f"SELECT * EXCLUDE ({ROW_ID}) FROM {clean} ORDER BY {ROW_ID}",
-        run_dir / CLEAN_PARQUET,
-        "FORMAT parquet",
-    )
-    _copy(
-        store,
-        f"SELECT * EXCLUDE ({ROW_ID}) FROM {clean} ORDER BY {ROW_ID}",
-        run_dir / CLEAN_CSV,
-        "HEADER, DELIMITER ','",
-    )
     if run.dropped_table:
         _copy(
             store,
@@ -430,11 +481,74 @@ def _write_outputs(
             run_dir / DROPPED_CSV,
             "HEADER, DELIMITER ','",
         )
+    if not result.blocked:
+        clean = f"SELECT * EXCLUDE ({ROW_ID}) FROM {_qualified(run.clean_table)} ORDER BY {ROW_ID}"
+        _copy(store, clean, run_dir / CLEAN_PARQUET, "FORMAT parquet")
+        _copy(store, clean, run_dir / CLEAN_CSV, "HEADER, DELIMITER ','")
+        handoff = _handoff(store, raw, result, run_id=run_id, rows_clean=rows_clean)
+        (run_dir / HANDOFF_FILE).write_text(
+            handoff.model_dump_json(indent=2, by_alias=True), encoding="utf-8"
+        )
+        (run_dir / SCHEMA_CONTRACT_FILE).write_text(
+            _contract_yaml(handoff, gate.outcome), encoding="utf-8"
+        )
 
-    report = render_report(
-        result, diagnosis, decisions, rows_raw=raw.n_rows, rows_clean=log["rows_clean"]
-    )
+    report = render_report(result, diagnosis, decisions, rows_raw=raw.n_rows, rows_clean=rows_clean)
     (run_dir / CLEANING_REPORT).write_text(report, encoding="utf-8")
+
+
+def _handoff(
+    store: RawStore, raw: RawTable, result: CoderResult, *, run_id: str, rows_clean: int
+) -> Handoff:
+    """What Stage 3 reads instead of the data: the contract, the accounting, the flags."""
+    run = result.run
+    dropped_columns: dict[str, str] = {}
+    for step, record in zip(result.plan.steps, run.records, strict=True):
+        if record.op_name == "drop_column":
+            dropped_columns[record.params["column"]] = record.params["reason"]
+        elif record.op_name == "custom_code":
+            for column in record.params.get("drops") or []:
+                dropped_columns[column] = step.rationale
+    return Handoff(
+        run_id=run_id,
+        table=run.clean_table,
+        data_file=CLEAN_PARQUET,
+        source_table=raw.name,
+        rows_raw=raw.n_rows,
+        rows_clean=rows_clean,
+        rows_dropped=sum(r.rows_dropped for r in run.records),
+        dropped_rows_table=run.dropped_table,
+        schema=result.contract,
+        dropped_columns=dropped_columns,
+        applied_ops=[r.op_id for r in run.records],
+        flags=list(result.gate.flags),
+        data_hash=store.data_hash(run.clean_table),
+    )
+
+
+def _contract_yaml(handoff: Handoff, outcome: str) -> str:
+    """The schema contract in a form a person reads; handoff.json holds the same."""
+    columns = {}
+    for column in handoff.schema_:
+        entry = {
+            "type": column.dtype,
+            "expected": column.expected_type,
+            "role": column.role,
+            "unique": column.unique,
+            "missing_allowed": column.nullable,
+            "missing_share": round(column.null_rate, 4),
+            "distinct": column.n_distinct,
+            "renamed_from": column.source_column,
+            "note": column.note,
+        }
+        columns[column.name] = {k: v for k, v in entry.items() if v is not None}
+    header = (
+        f"# Schema contract for {handoff.table}, verified by Gate 2 ({outcome.upper()}).\n"
+        f"# Later stages re-check {handoff.data_file} against it before using the data.\n\n"
+    )
+    body = {"table": handoff.table, "data_file": handoff.data_file, "rows": handoff.rows_clean}
+    body["columns"] = columns
+    return header + yaml.safe_dump(body, sort_keys=False, allow_unicode=True, width=100)
 
 
 def _copy(store: RawStore, query: str, path: Path, options: str) -> None:
@@ -459,14 +573,16 @@ def render_report(
     rows_clean: int,
 ) -> str:
     """The cleaning report. Every number comes from the execution log, never from the LLM."""
-    run, plan = result.run, result.plan
+    run, plan, gate = result.run, result.plan, result.gate
     n_custom = sum(1 for s in plan.steps if s.op == "custom_code")
     dropped = sum(r.rows_dropped for r in run.records)
     lines = [
         f"# Cleaning report: {run.clean_table}",
         "",
-        f"**All {len(plan.steps)} step(s) ran and every blocking check passed.** "
-        + (f"{n_custom} step(s) used custom code, shown in full below. " if n_custom else "")
+        f"**Gate 2: {gate.outcome.upper()}.** {GATE_VERDICT[gate.outcome]}",
+        "",
+        f"All {len(plan.steps)} step(s) ran. "
+        + (f"{n_custom} used custom code, shown in full below. " if n_custom else "")
         + "Nothing outside these steps changed the data, and the raw data is untouched.",
         "",
         f"- **Rows:** {rows_raw:,} raw -> {rows_clean:,} clean, {dropped:,} dropped"
@@ -474,9 +590,14 @@ def render_report(
         f"- **Columns:** {', '.join(run.columns)}",
         f"- **Plan:** {plan.summary}",
         "",
-        "## Steps",
+        "## Gate 2 checks",
         "",
     ]
+    order = {False: 0, True: 1}
+    for check in sorted(gate.checks, key=lambda c: (order[c.passed], c.severity != "block")):
+        mark = "pass" if check.passed else f"**FAIL ({check.severity})**"
+        lines.append(f"- {mark} `{check.name}`: {check.message}")
+    lines += ["", "## Steps", ""]
     for number, (step, record) in enumerate(zip(plan.steps, run.records, strict=True), start=1):
         custom = step.op == "custom_code"
         lines.append(
@@ -517,6 +638,8 @@ def render_report(
             lines.append(f"- Parameters: `{json.dumps(record.params, ensure_ascii=False)}`")
         lines.append("")
 
+    lines += _contract_table(result.contract)
+
     if plan.skipped:
         lines += ["## Not done, with reasons", ""]
         lines += [f"- **{s.id}**: {s.reason}" for s in plan.skipped]
@@ -541,21 +664,45 @@ def render_report(
         lines += [f"- {w}" for w in run.warnings]
         lines.append("")
 
-    lines += ["## Checks", ""]
-    for check in run.checks:
-        mark = "pass" if check.passed else f"**FAIL ({check.severity})**"
-        lines.append(f"- {mark} `{check.name}`: {check.message}")
-
     cost = (
         f", ${result.cost_usd:.4f}" if any(a.cost_usd is not None for a in result.attempts) else ""
     )
     lines += [
-        "",
         f"_Plan written by {result.attempts[-1].model} (prompt {result.prompt_version}, "
         f"{len(result.attempts)} attempt(s){cost}) from the masked profile and the diagnosis. "
         f"Every number in this report comes from the execution log._",
     ]
     return "\n".join(lines) + "\n"
+
+
+GATE_VERDICT = {
+    "pass": "The clean data matches the diagnosis and every check passed.",
+    "flag": "The clean data is usable; the flagged checks below deserve a look.",
+    "block": (
+        "This result may not be used, so no clean data, handoff or schema contract was "
+        "written. The failing checks are listed below."
+    ),
+}
+
+
+def _contract_table(contract: list[ColumnSchema]) -> list[str]:
+    lines = [
+        "## Schema contract",
+        "",
+        "What each clean column is, checked against the diagnosis. "
+        f"Saved as `{SCHEMA_CONTRACT_FILE}` and in `{HANDOFF_FILE}` when Gate 2 lets it through.",
+        "",
+        "| Column | Type | Expected | Role | Missing | Distinct | Note |",
+        "| --- | --- | --- | --- | ---: | ---: | --- |",
+    ]
+    for column in contract:
+        role = (column.role or "added") + (", key" if column.unique else "")
+        lines.append(
+            f"| {column.name} | {column.dtype} | {column.expected_type or ''} | {role} | "
+            f"{column.null_rate:.1%} | {column.n_distinct:,} | "
+            f"{(column.note or '').replace('|', '/')} |"
+        )
+    return [*lines, ""]
 
 
 # -- CLI --------------------------------------------------------------------
@@ -593,13 +740,17 @@ def main(argv: list[str] | None = None) -> int:
     n_custom = sum(1 for s in result.plan.steps if s.op == "custom_code")
     cost = f", ${result.cost_usd:.4f}" if result.cost_usd else ""
     print(
-        f"\n{len(result.plan.steps)} step(s) ran ({n_custom} custom code), "
-        f"{len(result.attempts)} attempt(s){cost}."
+        f"\nGate 2: {result.gate.outcome.upper()}. {len(result.plan.steps)} step(s) ran "
+        f"({n_custom} custom code), {len(result.attempts)} attempt(s){cost}."
     )
     for warning in run.warnings:
         print(f"Warning: {warning}")
     print(f"Report:     {(run_dir / CLEANING_REPORT).resolve()}")
+    if result.blocked:
+        print("No clean data was written; the report says why.")
+        return 1
     print(f"Clean data: {(run_dir / CLEAN_CSV).resolve()}")
+    print(f"Handoff:    {(run_dir / HANDOFF_FILE).resolve()}")
     return 0
 
 
