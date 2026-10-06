@@ -25,7 +25,7 @@ Clean it with the agents. Put any LLM API key in `.env` first (see [.env.example
 
 ```powershell
 uv run python -m pipeline.agents.analyst runs/<run folder>   # diagnosis.md + decisions.yaml
-# decide the judgment calls in decisions.yaml (or leave them undecided)
+# the AI has decided the judgment calls from your brief; change any in decisions.yaml
 uv run python -m pipeline.clean runs/<run folder>            # coder -> Gate 2 -> reviewer; report, clean data, handoff.json
 ```
 
@@ -61,7 +61,7 @@ Phase 1's exit criteria are met: a dataset can be cleaned by hand through the op
 | No silent coercion | `apply_op` raises on undeclared new nulls |
 | Every change is accounted for | `checks/reconciliation.py`, including replay from raw |
 | The LLM never sees raw rows or personal data | `ingestion/compact.py`, with tests asserting no personal value reaches the profile or any prompt; error messages sent back to an LLM are masked by `agents/feedback.py` |
-| An LLM never settles a judgment call | The coder may act only on calls decided in `decisions.yaml`; `agents/coder.py` refuses a plan that touches an undecided one |
+| No judgment call is settled silently | Decided by you, or by the AI from your brief (`judgment_calls: decide`, the default) with its choice, confidence, reasons and alternatives at the top of the report; low confidence must mean the least destructive option (`contracts/diagnosis.py`); every decision is reversible in `decisions.yaml`, and `agents/coder.py` refuses a plan that touches an undecided call |
 | The target is never imputed or dropped | Checked on the plan before it runs, on the data after every step (`ops/plan.py`), and against raw at Gate 2, which also catches a null token turned straight into a value |
 | Clean data is what the diagnosis said it would be | Gate 2's schema contract (`checks/schema.py`): types, columns, primary key; later stages re-check the data file against the saved contract |
 | The reviewer never sees a row or a personal value | `tools/queries.py` answers only aggregates, masks personal and ID values in the query itself and refuses to filter on them; the evidence pack is built from logs and masked profiles |

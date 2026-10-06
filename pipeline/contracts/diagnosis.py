@@ -48,8 +48,43 @@ class Issue(Strict):
     )
 
 
+class Alternative(Strict):
+    """An option the AI did not choose, and what choosing it would have changed."""
+
+    option: str
+    effect: str = Field(min_length=1, description="The analyst's estimate, not a measurement.")
+
+
+class AIDecision(Strict):
+    """How the AI settled a judgment call from the brief. Always shown, always reversible."""
+
+    choice: str = Field(description="Exactly one of the call's options.")
+    confidence: Literal["high", "medium", "low"]
+    reasoning: str = Field(
+        min_length=1, description="What in the brief, the guidance or the profile decided it."
+    )
+    expected_effect: str = Field(
+        min_length=1, description="What the choice will change, as the analyst expects it."
+    )
+    least_destructive: bool = Field(
+        description="True when the brief did not settle the call, so the option that changes "
+        "the least was taken."
+    )
+    alternatives: list[Alternative] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unsure_means_cautious(self) -> AIDecision:
+        if self.confidence == "low" and not self.least_destructive:
+            raise ValueError(
+                "a low-confidence decision must take the least destructive option "
+                "(least_destructive: true)"
+            )
+        return self
+
+
 class JudgmentCall(Strict):
-    """A decision the data cannot settle on its own. Flagged, never fixed."""
+    """A decision the data cannot settle on its own: decided by the user, or by the AI from
+    the brief, but never silently."""
 
     id: str = Field(description="Short id, e.g. 'J1'.")
     column: str | None = None
@@ -57,6 +92,25 @@ class JudgmentCall(Strict):
     options: list[str] = Field(min_length=2)
     recommendation: str = Field(min_length=1)
     why_it_matters: str = Field(min_length=1)
+    ai_decision: AIDecision | None = Field(
+        default=None, description="Present when the brief says judgment_calls: decide."
+    )
+
+    @model_validator(mode="after")
+    def _choice_is_an_option(self) -> JudgmentCall:
+        decision = self.ai_decision
+        if decision is None:
+            return self
+        if decision.choice not in self.options:
+            raise ValueError(
+                f"{self.id}: the AI's choice must be exactly one of the options {self.options}"
+            )
+        stray = [a.option for a in decision.alternatives if a.option not in self.options]
+        if stray or any(a.option == decision.choice for a in decision.alternatives):
+            raise ValueError(
+                f"{self.id}: alternatives must be the other options, each with its effect"
+            )
+        return self
 
 
 class ColumnTarget(Strict):

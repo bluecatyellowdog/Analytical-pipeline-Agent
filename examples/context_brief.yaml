@@ -33,6 +33,15 @@ focus_areas:
   - Applicants under 25
   - Loans above 200,000 DKK
 
+# How unclear cases (judgment calls) are settled:
+#   decide: the AI settles each one from this brief, shown in the report and reversible
+#   ask:    every one waits for you in decisions.yaml
+judgment_calls: decide
+# Plain-words guidance the AI follows when it decides.
+guidance: >
+  999 in amounts meant unknown in the old system. Never fill in missing values;
+  leave them missing. Large loans are real and must be kept.
+
 excluded_variables:
   - koen        # legally sensitive: must not be used as a feature
   - postnummer  # proxy for protected characteristics

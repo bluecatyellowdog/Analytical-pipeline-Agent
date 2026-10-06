@@ -82,8 +82,14 @@ def prompt_version() -> str:
 
 def build_messages(profile_llm: dict[str, Any], brief: ContextBrief) -> list[Message]:
     """The whole prompt. Built only from the compact profile and the brief."""
+    mode = (
+        "judgment_calls: decide (decide every judgment call from the brief, as the rules say)"
+        if brief.judgment_calls == "decide"
+        else "judgment_calls: ask (leave every judgment call to the user)"
+    )
     user = (
         f"Context brief:\n{brief_block(brief)}\n"
+        f"{mode}\n\n"
         f"{profile_block(profile_llm)}\n\n"
         "Return the diagnosis as one JSON object."
     )
@@ -145,6 +151,15 @@ def check_diagnosis(
         if name in actual and entry is not None and entry.role != "excluded":
             problems.append(f"the brief excludes {name!r}; give it role 'excluded'")
 
+    if brief.judgment_calls == "decide":
+        for call in diagnosis.judgment_calls:
+            if call.ai_decision is None:
+                problems.append(
+                    f"{call.id} has no ai_decision; the brief says judgment_calls: decide, so "
+                    f"decide it (the least destructive option, with low confidence, when the "
+                    f"brief does not settle it)"
+                )
+
     return problems
 
 
@@ -165,6 +180,8 @@ def diagnose(
 
         try:
             diagnosis = parse_reply(response.text)
+            if brief.judgment_calls == "ask":
+                diagnosis = _without_ai_decisions(diagnosis)
             attempt.problems = check_diagnosis(diagnosis, profile_llm, brief)
         except ValueError as error:
             attempt.problems = [str(error)]
@@ -190,6 +207,12 @@ def diagnose(
     )
 
 
+def _without_ai_decisions(diagnosis: Diagnosis) -> Diagnosis:
+    """In ask mode a decision the model offered anyway is dropped: the user decides."""
+    calls = [c.model_copy(update={"ai_decision": None}) for c in diagnosis.judgment_calls]
+    return diagnosis.model_copy(update={"judgment_calls": calls})
+
+
 def render_markdown(diagnosis: Diagnosis, result: AnalystResult | None = None) -> str:
     """A readable version for the run folder."""
     lines = ["# Diagnosis", "", diagnosis.summary, ""]
@@ -205,7 +228,13 @@ def render_markdown(diagnosis: Diagnosis, result: AnalystResult | None = None) -
             f"  - Evidence: {issue.evidence}",
         ]
 
-    lines += ["", "## Judgment calls (for you to decide)", ""]
+    deciding = any(call.ai_decision for call in diagnosis.judgment_calls)
+    heading = (
+        "## Judgment calls (decided by the AI from your brief; change any in decisions.yaml)"
+        if deciding
+        else "## Judgment calls (for you to decide in decisions.yaml)"
+    )
+    lines += ["", heading, ""]
     if not diagnosis.judgment_calls:
         lines.append("None.")
     for call in diagnosis.judgment_calls:
@@ -213,9 +242,19 @@ def render_markdown(diagnosis: Diagnosis, result: AnalystResult | None = None) -
         lines += [
             f"- **{call.id}**{where}: {call.question}",
             *(f"  - Option: {option}" for option in call.options),
-            f"  - Recommendation: {call.recommendation}",
-            f"  - Why it matters: {call.why_it_matters}",
         ]
+        ai = call.ai_decision
+        if ai is None:
+            lines.append(f"  - Recommendation: {call.recommendation}")
+        else:
+            caution = " (least destructive, because the brief does not settle it)"
+            lines += [
+                f"  - **Decided by the AI:** {ai.choice}. Confidence: {ai.confidence}"
+                + (caution if ai.least_destructive else ""),
+                f"  - Why: {ai.reasoning}",
+                f"  - Expected effect: {ai.expected_effect}",
+            ]
+        lines.append(f"  - Why it matters: {call.why_it_matters}")
 
     lines += [
         "",
@@ -299,9 +338,16 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print(render_markdown(result.diagnosis, result))
     print(f"Wrote {(run_dir / DIAGNOSIS_MD).resolve()}")
-    if result.diagnosis.judgment_calls:
+    calls = result.diagnosis.judgment_calls
+    if calls and any(call.ai_decision for call in calls):
         print(
-            f"Decide the {len(result.diagnosis.judgment_calls)} judgment call(s) in "
+            f"The AI decided the {len(calls)} judgment call(s) from your brief. Check or change "
+            f"them in {(run_dir / DECISIONS_FILE).resolve()}, then clean the data:\n"
+            f"  uv run python -m pipeline.clean {run_dir.as_posix()}"
+        )
+    elif calls:
+        print(
+            f"Decide the {len(calls)} judgment call(s) in "
             f"{(run_dir / DECISIONS_FILE).resolve()}, then clean the data:\n"
             f"  uv run python -m pipeline.clean {run_dir.as_posix()}"
         )

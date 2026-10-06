@@ -415,9 +415,7 @@ def _write_outputs(
         clean = f"SELECT * EXCLUDE ({ROW_ID}) FROM {_qualified(run.clean_table)} ORDER BY {ROW_ID}"
         _copy(store, clean, run_dir / CLEAN_PARQUET, "FORMAT parquet")
         _copy(store, clean, run_dir / CLEAN_CSV, "HEADER, DELIMITER ','")
-        handoff = _handoff(
-            store, raw, outcome, run_id=inputs.manifest.run_id, rows_clean=rows_clean
-        )
+        handoff = _handoff(store, raw, outcome, inputs, rows_clean=rows_clean)
         (run_dir / HANDOFF_FILE).write_text(
             handoff.model_dump_json(indent=2, by_alias=True), encoding="utf-8"
         )
@@ -425,12 +423,19 @@ def _write_outputs(
             _contract_yaml(handoff, gate.outcome), encoding="utf-8"
         )
 
-    report = render_report(outcome, inputs, rows_raw=raw.n_rows, rows_clean=rows_clean)
+    report = render_report(
+        outcome, inputs, rows_raw=raw.n_rows, rows_clean=rows_clean, run_dir=run_dir
+    )
     (run_dir / CLEANING_REPORT).write_text(report, encoding="utf-8")
 
 
 def _handoff(
-    store: RawStore, raw: RawTable, outcome: CleaningOutcome, *, run_id: str, rows_clean: int
+    store: RawStore,
+    raw: RawTable,
+    outcome: CleaningOutcome,
+    inputs: FolderInputs,
+    *,
+    rows_clean: int,
 ) -> Handoff:
     """What Stage 3 reads instead of the data: the contract, the accounting, every flag."""
     result = outcome.result
@@ -449,8 +454,9 @@ def _handoff(
         Flag(code="cleaning_note", severity="warn", message=note, stage="cleaning")
         for note in outcome.notes
     ]
+    flags += _decision_flags(inputs)
     return Handoff(
-        run_id=run_id,
+        run_id=inputs.manifest.run_id,
         table=run.clean_table,
         data_file=CLEAN_PARQUET,
         source_table=raw.name,
@@ -465,6 +471,45 @@ def _handoff(
         flags=flags,
         data_hash=store.data_hash(run.clean_table),
     )
+
+
+def _decision_flags(inputs: FolderInputs) -> list[Flag]:
+    """Every settled judgment call travels on, with who settled it and how sure the AI was."""
+    by_id = {d.id: d for d in inputs.decisions}
+    flags = []
+    for call in inputs.diagnosis.judgment_calls:
+        decision = by_id.get(call.id)
+        if decision is None or not decision.decided:
+            continue
+        ai = call.ai_decision
+        if decision.decided_by == "ai" and ai is not None:
+            flags.append(
+                Flag(
+                    code="ai_decision",
+                    severity="warn" if ai.confidence == "low" else "info",
+                    message=f"{call.id}: '{ai.choice}' decided by the AI ({ai.confidence} "
+                    f"confidence). {ai.reasoning}",
+                    column=call.column,
+                    stage="cleaning",
+                    details={
+                        "choice": ai.choice,
+                        "confidence": ai.confidence,
+                        "least_destructive": ai.least_destructive,
+                        "alternatives": [a.option for a in ai.alternatives],
+                    },
+                )
+            )
+        else:
+            flags.append(
+                Flag(
+                    code="user_decision",
+                    severity="info",
+                    message=f"{call.id}: '{decision.choice}' decided by the user.",
+                    column=call.column,
+                    stage="cleaning",
+                )
+            )
+    return flags
 
 
 def _review_log(outcome: CleaningOutcome) -> dict[str, Any]:
@@ -542,7 +587,12 @@ REVIEW_VERDICT = {
 
 
 def render_report(
-    outcome: CleaningOutcome, inputs: FolderInputs, *, rows_raw: int, rows_clean: int
+    outcome: CleaningOutcome,
+    inputs: FolderInputs,
+    *,
+    rows_raw: int,
+    rows_clean: int,
+    run_dir: Path | None = None,
 ) -> str:
     """The cleaning report. Every number comes from the logs, never from an LLM."""
     result = outcome.result
@@ -568,7 +618,8 @@ def render_report(
         f"- **Plan:** {plan.summary}",
         "",
     ]
-    lines += _for_you(outcome)
+    lines += _ai_decisions(outcome, inputs, run_dir)
+    lines += _for_you(outcome, inputs)
     lines += ["## Gate 2 checks", ""]
     order = {False: 0, True: 1}
     for check in sorted(gate.checks, key=lambda c: (order[c.passed], c.severity != "block")):
@@ -588,7 +639,12 @@ def render_report(
         lines += ["## Judgment calls", ""]
         for call in inputs.diagnosis.judgment_calls:
             decision = by_id.get(call.id)
-            if decision is not None and decision.decided:
+            if decision is not None and decision.decided and decision.decided_by == "ai":
+                lines.append(
+                    f"- **{call.id}** decided by the AI: {decision.choice} "
+                    f"(see 'Decided by the AI' above)"
+                )
+            elif decision is not None and decision.decided:
                 lines.append(f"- **{call.id}** decided by you: {decision.choice}")
             else:
                 lines.append(
@@ -615,18 +671,107 @@ def render_report(
     return "\n".join(lines) + "\n"
 
 
-def _for_you(outcome: CleaningOutcome) -> list[str]:
+def _ai_decided(inputs: FolderInputs) -> list:
+    """The judgment calls the AI settled and the user has not changed, least certain first."""
+    by_id = {d.id: d for d in inputs.decisions}
+    calls = [
+        call
+        for call in inputs.diagnosis.judgment_calls
+        if call.ai_decision is not None
+        and by_id.get(call.id) is not None
+        and by_id[call.id].decided
+        and by_id[call.id].decided_by == "ai"
+    ]
+    order = {"low": 0, "medium": 1, "high": 2}
+    return sorted(calls, key=lambda c: order[c.ai_decision.confidence])
+
+
+def _ai_decisions(
+    outcome: CleaningOutcome, inputs: FolderInputs, run_dir: Path | None
+) -> list[str]:
+    """Every choice the AI made for the user: what, why, how sure, what it did, how to undo it."""
+    calls = _ai_decided(inputs)
+    if not calls:
+        return []
+    folder = run_dir.as_posix() if run_dir is not None else "<this run folder>"
+    lines = [
+        "## Decided by the AI: check these",
+        "",
+        f"The AI settled {len(calls)} judgment call(s) from your brief "
+        f"(`judgment_calls: decide`), least certain first. Each can be undone: change its "
+        f"`decision:` in `{DECISIONS_FILE}` and run the cleaning again. The raw data is never "
+        f"changed.",
+        "",
+    ]
+    for call in calls:
+        ai = call.ai_decision
+        where = f" ({call.column})" if call.column else ""
+        confidence = f"- **Confidence:** {ai.confidence}"
+        if ai.least_destructive:
+            confidence += (
+                ". The brief does not settle this, so the least destructive option was "
+                "taken. **Please check it.**"
+            )
+        lines += [
+            f"### {call.id}{where}: {call.question}",
+            "",
+            f"- **Decision:** {ai.choice}",
+            confidence,
+            f"- **Why:** {ai.reasoning}",
+            f"- **What it did (measured):** {_measured(call.id, outcome.result)}",
+            f"- **Expected effect (the AI's estimate):** {ai.expected_effect}",
+        ]
+        if ai.alternatives:
+            lines.append("- **Alternatives (the AI's estimates, not measured):**")
+            lines += [f"  - {alt.option}: {alt.effect}" for alt in ai.alternatives]
+        lines += [
+            f"- **To change it:** set `decision:` under `{call.id}` in `{DECISIONS_FILE}` to "
+            f"another option, your own words, or `undecided`, then run "
+            f"`uv run python -m pipeline.clean {folder}`",
+            "",
+        ]
+    return lines
+
+
+def _measured(call_id: str, result: CoderResult) -> str:
+    """What the steps carrying out a decision changed, from the execution log."""
+    parts = []
+    steps = zip(result.plan.steps, result.run.records, strict=True)
+    for number, (step, record) in enumerate(steps, start=1):
+        if call_id not in step.addresses:
+            continue
+        changed = ", ".join(f"{c} {n} cell(s)" for c, n in record.cells_changed.items())
+        details = [changed or "no values changed"]
+        if record.new_nulls:
+            details.append(
+                "new missing values: " + ", ".join(f"{c} {n}" for c, n in record.new_nulls.items())
+            )
+        if record.rows_dropped:
+            details.append(f"{record.rows_dropped} row(s) dropped")
+        parts.append(f"step {number} ({step.op}): " + "; ".join(details))
+    if parts:
+        return "; ".join(parts)
+    skipped = [s.reason for s in result.plan.skipped if s.id == call_id]
+    if skipped:
+        return f"no change to the data. {skipped[0]}"
+    return "no step carried it out"
+
+
+def _for_you(outcome: CleaningOutcome, inputs: FolderInputs) -> list[str]:
     """Everything a person should look at, in one place near the top."""
     items = list(outcome.notes)
-    seen: set[str] = set()
-    for reviewed in outcome.reviews:
-        for ambiguity in reviewed.outcome.ambiguities:
-            if ambiguity.question not in seen:
-                seen.add(ambiguity.question)
-                where = f" ({ambiguity.column})" if ambiguity.column else ""
-                items.append(
-                    f"Question{where}: {ambiguity.question} Evidence: {ambiguity.evidence}"
-                )
+    items += [
+        f"{call.id} was decided by the AI with low confidence: '{call.ai_decision.choice}', "
+        f"the least destructive option. Check it under 'Decided by the AI'."
+        for call in _ai_decided(inputs)
+        if call.ai_decision.confidence == "low"
+    ]
+    # The final round saw the final data, so its questions are the current ones; earlier
+    # rounds' questions stay in the Review section and review_log.json.
+    if outcome.reviews:
+        for ambiguity in outcome.reviews[-1].outcome.ambiguities:
+            where = f" ({ambiguity.column})" if ambiguity.column else ""
+            items.append(f"Question{where}: {ambiguity.question} Evidence: {ambiguity.evidence}")
     if outcome.reviews:
         final = outcome.reviews[-1]
         if not final.verdict.accepted:

@@ -28,6 +28,7 @@ from pipeline.contracts.handoff import Handoff
 from pipeline.ingest import ingest
 from pipeline.ingestion.raw import RawStore
 from tests.unit.test_coder import DIAGNOSIS, GOOD_STEPS, plan_json, step
+from tests.unit.test_decisions import ai_decided
 
 pytestmark = pytest.mark.e2e
 
@@ -73,19 +74,26 @@ def verdict(findings=(), ambiguities=(), accepted=True) -> str:
 REJECT = verdict(findings=[EMAIL_FINDING], accepted=False)
 
 
-@pytest.fixture
-def run_dir(fixtures_dir, tmp_path):
+def make_run(fixtures_dir, tmp_path, **brief_fields):
     source = tmp_path / "loans.csv"
     shutil.copy(fixtures_dir / "danish_semicolon.csv", source)
-    brief = ContextBrief(
-        description="Loan applications.",
-        goal="Understand loan size.",
-        target="beloeb",
-        excluded_variables=["email"],
-    )
+    fields = {
+        "description": "Loan applications.",
+        "goal": "Understand loan size.",
+        "target": "beloeb",
+        "excluded_variables": ["email"],
+        "judgment_calls": "ask",
+    }
+    fields.update(brief_fields)
     with RawStore.open() as store:
-        result = ingest(source, brief, store=store)
+        result = ingest(source, ContextBrief(**fields), store=store)
     return result.write(tmp_path / "run"), source
+
+
+@pytest.fixture
+def run_dir(fixtures_dir, tmp_path):
+    """The user decides every judgment call by hand (judgment_calls: ask)."""
+    return make_run(fixtures_dir, tmp_path)
 
 
 def diagnose(folder) -> None:
@@ -320,3 +328,58 @@ class TestRefusals:
         assert manifest_of(folder)["stage_status"]["cleaning"] == "blocked"
         log = json.loads((folder / clean.CODER_LOG).read_text(encoding="utf-8"))
         assert len(log["attempts"]) == 3
+
+
+def ai_section(report: str) -> str:
+    """The 'Decided by the AI' part of the report, up to the next section."""
+    after = report.split("## Decided by the AI: check these")[1]
+    ends = [after.find(h) for h in ("## For you to look at", "## Gate 2 checks")]
+    return after[: min(i for i in ends if i >= 0)]
+
+
+class TestAIDecisions:
+    """judgment_calls: decide. The AI settles the calls; the report shows every choice."""
+
+    SKIP_J2 = {"id": "J2", "reason": "The decision keeps missing ages as they are."}
+
+    @pytest.fixture
+    def deciding(self, fixtures_dir, tmp_path):
+        folder, _ = make_run(
+            fixtures_dir,
+            tmp_path,
+            judgment_calls="decide",
+            guidance="999 always means unknown.",
+        )
+        analyst.run_on_folder(folder, FakeLLM([ai_decided().model_dump_json()]), PROVIDER)
+        return folder
+
+    def test_the_report_shows_every_ai_decision_least_certain_first(self, deciding) -> None:
+        plan = plan_json([*GOOD_STEPS, SENTINEL], skipped=[self.SKIP_J2])
+        run_clean(deciding, [plan])
+        report = report_of(deciding)
+
+        section = ai_section(report)
+        assert section.index("### J2") < section.index("### J1")
+        assert "- **Decision:** Treat 999 as missing" in section
+        assert "Please check it." in section
+        assert "new missing values: beloeb 3" in section
+        assert "no change to the data. The decision keeps missing ages as they are." in section
+        assert "Impute median: Two ages filled in." in section
+        assert f"uv run python -m pipeline.clean {deciding.as_posix()}" in section
+        assert "J2 was decided by the AI with low confidence" in report
+
+        handoff = json.loads((deciding / clean.HANDOFF_FILE).read_text(encoding="utf-8"))
+        ai_flags = [f for f in handoff["flags"] if f["code"] == "ai_decision"]
+        assert {f["details"]["confidence"] for f in ai_flags} == {"high", "low"}
+
+    def test_an_answer_the_user_changes_becomes_theirs(self, deciding) -> None:
+        decide(deciding, J1="Keep 999")
+        skip_j1 = {"id": "J1", "reason": "The user keeps 999 as an amount."}
+        run_clean(deciding, [plan_json(GOOD_STEPS, skipped=[skip_j1, self.SKIP_J2])])
+
+        report = report_of(deciding)
+        section = ai_section(report)
+        assert "### J1" not in section and "### J2" in section
+        assert "**J1** decided by you: Keep 999" in report
+        handoff = json.loads((deciding / clean.HANDOFF_FILE).read_text(encoding="utf-8"))
+        assert any(f["code"] == "user_decision" for f in handoff["flags"])

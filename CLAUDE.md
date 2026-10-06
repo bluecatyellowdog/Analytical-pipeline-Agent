@@ -13,7 +13,10 @@ Reference: docs/project_spec.pdf. Read the relevant section before larger change
 - No silent coercion (never errors="coerce"); new nulls must be explained.
 - Numbers in reports come from logs, never from LLM text.
 - The LLM never sees raw rows or personal data; only compact, masked profiles.
-- Deterministic checks first, judgment second. Flag judgment calls; don't fix them.
+- Deterministic checks first, judgment second. No judgment call is settled silently: the user
+  decides it, or (brief `judgment_calls: decide`, the default) the AI decides it from the brief,
+  with choice, confidence, reasoning and alternatives in the report, reversible in decisions.yaml.
+  When the brief does not settle a call, the AI takes the least destructive option and flags it.
 
 ## Working rules
 - One roadmap task per session. Propose a plan before writing code.

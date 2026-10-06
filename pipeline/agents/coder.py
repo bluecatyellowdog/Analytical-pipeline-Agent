@@ -118,7 +118,10 @@ def decisions_block(diagnosis: Diagnosis, decisions: list[Decision]) -> str:
         where = f" ({call.column})" if call.column else ""
         decision = by_id.get(call.id)
         if decision is not None and decision.decided:
-            decided.append(f"- {call.id}{where}: {call.question} -> decided: {decision.choice}")
+            who = "by the AI from the brief" if decision.decided_by == "ai" else "by the user"
+            decided.append(
+                f"- {call.id}{where}: {call.question} -> decided {who}: {decision.choice}"
+            )
         else:
             undecided.append(f"- {call.id}{where}: {call.question}")
     return (

@@ -44,6 +44,7 @@ def brief():
         target="beloeb",
         id_column="kunde_id",
         excluded_variables=["email"],
+        judgment_calls="ask",
     )
 
 
@@ -200,3 +201,62 @@ class TestDiagnose:
             diagnose(profile_llm, brief, llm)
         assert len(error.value.attempts) == 3
         assert len(llm.calls) == 3
+
+
+def decided(call: dict, choice: str, confidence: str = "high", least: bool = False) -> dict:
+    others = [o for o in call["options"] if o != choice]
+    return {
+        **call,
+        "ai_decision": {
+            "choice": choice,
+            "confidence": confidence,
+            "reasoning": "The brief says 999 was used for unknown before 2021.",
+            "expected_effect": "Three amounts become missing.",
+            "least_destructive": least,
+            "alternatives": [{"option": o, "effect": "Different amounts."} for o in others],
+        },
+    }
+
+
+class TestDecideMode:
+    @pytest.fixture
+    def deciding(self, brief):
+        return brief.model_copy(
+            update={"judgment_calls": "decide", "guidance": "999 always means unknown."}
+        )
+
+    def test_the_prompt_says_to_decide_and_carries_the_guidance(self, profile_llm, deciding):
+        text = build_messages(profile_llm, deciding)[-1]["content"]
+        assert "judgment_calls: decide" in text
+        assert "999 always means unknown." in text
+
+    def test_every_call_needs_a_decision(self, profile_llm, deciding) -> None:
+        problems = check_diagnosis(parse_reply(reply(good_diagnosis())), profile_llm, deciding)
+        assert any("J1" in p and "decision" in p for p in problems)
+
+    def test_a_decided_diagnosis_passes(self, profile_llm, deciding) -> None:
+        data = good_diagnosis()
+        data["judgment_calls"] = [decided(data["judgment_calls"][0], "Treat 999 as missing")]
+        assert check_diagnosis(parse_reply(reply(data)), profile_llm, deciding) == []
+
+    def test_the_choice_must_be_one_of_the_options(self) -> None:
+        data = good_diagnosis()
+        call = decided(data["judgment_calls"][0], "Treat 999 as missing")
+        call["ai_decision"]["choice"] = "Something else entirely"
+        data["judgment_calls"] = [call]
+        with pytest.raises(ValueError, match="options"):
+            parse_reply(reply(data))
+
+    def test_an_unsure_decision_must_be_the_least_destructive(self) -> None:
+        data = good_diagnosis()
+        data["judgment_calls"] = [
+            decided(data["judgment_calls"][0], "Keep 999 as an amount", confidence="low")
+        ]
+        with pytest.raises(ValueError, match="least destructive"):
+            parse_reply(reply(data))
+
+    def test_ask_mode_never_keeps_an_ai_decision(self, profile_llm, brief) -> None:
+        data = good_diagnosis()
+        data["judgment_calls"] = [decided(data["judgment_calls"][0], "Treat 999 as missing")]
+        result = diagnose(profile_llm, brief, FakeLLM([reply(data)]))
+        assert result.diagnosis.judgment_calls[0].ai_decision is None

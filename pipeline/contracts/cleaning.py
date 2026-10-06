@@ -8,7 +8,7 @@ here touches the data.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -52,10 +52,11 @@ UNDECIDED = "undecided"
 
 
 class Decision(Strict):
-    """The user's answer to one judgment call from the diagnosis."""
+    """The answer to one judgment call: the user's, or the AI's when the brief lets it decide."""
 
     id: str
     choice: str = Field(min_length=1)
+    decided_by: Literal["user", "ai"] = "user"
 
     @property
     def decided(self) -> bool:

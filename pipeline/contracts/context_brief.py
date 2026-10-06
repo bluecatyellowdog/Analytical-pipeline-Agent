@@ -91,6 +91,20 @@ class ContextBrief(Strict):
         description="Explicit checkable claims; more are derived in Stage 1.",
     )
     notes: str | None = Field(default=None, description="Anything else, free text.")
+    guidance: str | None = Field(
+        default=None,
+        description=(
+            "How unclear cases should be handled, in plain words, e.g. '999 always means "
+            "unknown; never fill in missing values'. Read when judgment calls are decided."
+        ),
+    )
+    judgment_calls: Literal["decide", "ask"] = Field(
+        default="decide",
+        description=(
+            "'decide': the AI settles each judgment call from this brief, visibly and "
+            "reversibly; 'ask': every call waits for the user in decisions.yaml."
+        ),
+    )
 
     @field_validator("description", "goal")
     @classmethod

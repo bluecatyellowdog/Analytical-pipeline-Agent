@@ -4,6 +4,7 @@ You receive the user's brief, the analyst's diagnosis, the user's decisions on j
 
 Check at least these, and anything else the evidence suggests:
 - Decisions: was each decided judgment call carried out exactly as decided (scope, values, rows)? Were undecided ones left alone?
+- Decisions the AI made: some judgment calls say "decided by the AI from the brief". Judge whether each choice fits the brief and the data. If it does not, report it as an ambiguity, never as a fix: only the user overrides a decision.
 - Magnitudes: do parsed numbers have plausible sizes (a decimal comma misread shifts values by 100 or 1000)?
 - Dates: do parsed dates fall where the brief says they should? A swapped day and month still parses but moves dates.
 - Categories: did standardisation merge only spellings of the same thing?

@@ -1,0 +1,75 @@
+# Context brief for the Titanic passenger list (data/raw/Titanic-Dataset.csv).
+# Every checkable statement here is treated as a hypothesis and verified in Stage 1.
+description: >
+  One row per passenger on the Titanic's maiden voyage in April 1912, from the
+  widely used public training set. Fares are in 1912 pounds.
+goal: >
+  Understand which passenger characteristics are associated with survival,
+  and whether the relationship differs for children and for third-class passengers.
+
+target: Survived
+unit_of_observation: one passenger
+id_column: PassengerId
+
+column_notes:
+  - name: Survived
+    description: 1 if the passenger survived, 0 if not
+    allowed_values: ["0", "1"]
+  - name: Pclass
+    description: Ticket class, 1 = first, 2 = second, 3 = third
+    allowed_values: ["1", "2", "3"]
+  - name: Age
+    description: Age in years; fractional for infants under one year
+    unit: years
+    known_issues: Missing for many passengers.
+  - name: SibSp
+    description: Number of siblings and spouses aboard
+  - name: Parch
+    description: Number of parents and children aboard
+  - name: Fare
+    description: Ticket fare
+    unit: GBP (1912)
+  - name: Cabin
+    description: Cabin number; recorded mainly for first-class passengers
+  - name: Embarked
+    description: Port of embarkation, C = Cherbourg, Q = Queenstown, S = Southampton
+    allowed_values: ["C", "Q", "S"]
+
+known_issues:
+  - Age is missing for about a fifth of passengers.
+  - Cabin is missing for most passengers, mainly in second and third class.
+
+focus_areas:
+  - Children (under 16)
+  - Third-class passengers
+
+# How unclear cases (judgment calls) are settled:
+#   decide: the AI settles each one from this brief, shown in the report and reversible
+#   ask:    every one waits for you in decisions.yaml
+judgment_calls: decide
+# Plain-words guidance the AI follows when it decides.
+guidance: >
+  Missing ages must stay missing; never fill them in. High fares are real and
+  must be kept.
+
+excluded_variables:
+  - Name    # personal data, not a feature
+  - Ticket  # free-form ticket code
+
+claims:
+  - kind: column_unique
+    column: PassengerId
+    text: PassengerId is unique
+  - kind: binary_column
+    column: Survived
+    text: the target is binary
+  - kind: value_range
+    column: Age
+    params:
+      min: 0
+      max: 100
+    text: ages are between 0 and 100
+  - kind: row_count
+    params:
+      expected: 891
+    text: 891 passengers
