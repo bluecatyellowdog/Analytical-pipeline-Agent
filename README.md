@@ -20,11 +20,12 @@ More detail: [specification](docs/project_spec.pdf) · [working rules](CLAUDE.md
 | 4. Check decisions | You (optional) | Change any of the AI's decisions in `decisions.yaml`. | edit a YAML file |
 | 5. Clean | AI: coder and reviewer | The coder writes a cleaning plan, which runs step by step from the original data. **Gate 2** checks the result. The reviewer checks that it makes sense and can send fixes back, at most twice. | `pipeline.clean` |
 | 6. Plan the analysis | AI: planner | Writes 3–5 questions that serve your goal, each answered with the [analysis tools](#analysis-tools), and marks what this data cannot answer, with the reason. **Gate 3** checks the plan. It is approved automatically; to change it, edit `analysis_plan.yaml`. | `pipeline.agents.planner` |
-| 7. Read the report | You | `run_report.pdf` opens with a one-page summary, then tells the whole story: the dirty data, what was wrong, every change (with any code the AI wrote), the checks, the review and the analysis plan. To change a cleaning decision, edit `decisions.yaml` and run step 5 again. | – |
+| 7. Analyse | AI: analysis agent | Runs the plan with the tools in up to three rounds, following up on whatever looks interesting, then writes up what it found: an answer per question and findings that cite the tool results behind them. **Gate 4** checks that every number in the write-up is one a tool reported. | `pipeline.analyze` |
+| 8. Read the report | You | `run_report.pdf` opens with a one-page summary and the headline findings, then the findings in full with their charts, then the whole story of the data: what was wrong, every change (with any code the AI wrote), the checks, the review and the plan. To change a cleaning decision, edit `decisions.yaml` and run step 5 again; to change the analysis, edit `analysis_plan.yaml` and run step 7 again. | – |
 
-Steps 2, 3, 5 and 6 run in one go with `pipeline.run`; the separate commands do the same work one step at a time.
+Steps 2, 3 and 5–7 run in one go with `pipeline.run`; the separate commands do the same work one step at a time.
 
-Not built yet: run the analysis from the plan → the findings in the report → optional public dashboard. Your edits to `analysis_plan.yaml` take effect once the analysis step exists.
+Not built yet: an optional public dashboard.
 
 ### Gates
 
@@ -42,6 +43,11 @@ A gate is an automatic check between steps. **PASS** continues, **FLAG** continu
   - no ID, personal data, free text or excluded column is analysed
   - a column that predicts the outcome almost perfectly on its own is left out: it probably gives the answer away
   - every question has enough rows (10 rows with the rarer outcome per regression feature, two groups of 30 to compare), or is marked "not possible" with the reason
+- **Gate 4, after the analysis:**
+  - every plan question is answered, or marked "not possible" with the reason
+  - every finding rests on tool calls that ran, and every number in the write-up is one those calls reported (rounding is fine; a number the AI worked out itself is not)
+  - a finding that rests only on a model doing no better than no model at all cannot be called strong
+  - model warnings (a suspiciously good fit, too few rows) are shown at the top of the report
 
 ## Quickstart
 
@@ -60,7 +66,7 @@ uv run pytest
 uv run python -m pipeline.run tests/fixtures/danish_semicolon.csv --brief examples/context_brief.yaml
 ```
 
-It ingests, diagnoses and cleans the file and plans the analysis, then prints a short summary and where the PDF report is. `runs/index.md` lists every run.
+It ingests, diagnoses and cleans the file, then plans and runs the analysis, and prints a short summary and where the PDF report is. `runs/index.md` lists every run.
 
 Or step by step, which does exactly the same:
 
@@ -68,10 +74,10 @@ Or step by step, which does exactly the same:
 uv run python -m pipeline.ingest tests/fixtures/danish_semicolon.csv --brief examples/context_brief.yaml
 uv run python -m pipeline.agents.analyst runs/<run folder>
 uv run python -m pipeline.clean runs/<run folder>
-uv run python -m pipeline.agents.planner runs/<run folder>
+uv run python -m pipeline.analyze runs/<run folder>
 ```
 
-Ingesting is free. Diagnosing, cleaning and planning call the LLM: a small dataset costs about $0.50–0.75 with Claude Opus, of which planning about $0.10. If Gate 1 blocks the file, the run stops before any LLM call. See [Settings](#settings) to make it cheaper.
+Ingesting is free. The other steps call the LLM: a small dataset costs about $0.80–1.10 with Claude Opus, of which planning about $0.10 and the analysis about $0.30. If Gate 1 blocks the file, the run stops before any LLM call. See [Settings](#settings) to make it cheaper.
 
 ## The brief
 
@@ -123,6 +129,8 @@ Every decision appears in two places:
 | `dropped_rows.csv` | clean | Every removed row, with the reason |
 | `analysis_plan.yaml` | planner, then you | The analysis plan: the questions, their tools, what was left out and why; edit to change |
 | `analysis_plan_ai.json` | planner | The plan exactly as the AI wrote it and Gate 3 passed it |
+| `analysis_report.md` | analysis | The findings in Markdown, with the charts and every tool call |
+| `analysis.json`, `artifacts.json` | analysis | The write-up, every tool call, and every result and finding as a standalone artifact with its audit references |
 | `manifest.json` | every step | Models, prompt versions, cost and the status of each step |
 | `*_log.json`, `gate_*.json`, `cleaning_plan.json` | every step | The full audit trail: every AI attempt, query, step and check |
 
@@ -173,7 +181,7 @@ Results go to `runs/benchmark_<timestamp>/summary.md`, with each case's run fold
 
 ## Analysis tools
 
-The analysis stage is being built. Its AI agent will not write code: it picks from a fixed set of tested tools, and every result is saved with a pointer to the call that made it.
+The analysis agent does not write code: it picks from a fixed set of tested tools, and every result is saved with a pointer to the call that made it. Linear regression and `target_by_group` can also take another column as the outcome, for side questions such as "what goes with the fare?".
 
 | Tool | Answers |
 | --- | --- |
@@ -226,7 +234,9 @@ Rules every tool follows:
 | The clean data is what the diagnosis said it would be | Gate 2's schema contract (`checks/schema.py`); later stages re-check the data file against it |
 | The reviewer's claims are backed by numbers | `agents/reviewer.py` drops claims citing numbers it was never shown and needs two verified checks to accept |
 | Questions only you can answer reach you | The reviewer reports them in the report; nothing it says can change a decision |
-| Every analysis result can be traced | Each one is saved as an artifact pointing to the tool call and the plan question behind it (`tools/registry.py`) |
+| Every analysis result can be traced | Each one is saved as an artifact pointing to the tool call and the plan question behind it (`tools/registry.py`); each finding points to the calls it rests on (`agents/analysis.py`) |
+| Every number in the findings was computed by a tool | Gate 4 (`checks/analysis_gate.py`, `checks/traceability.py`) matches every number in the AI's write-up against the results of the calls it cites |
+| No finding claims more than its evidence | Gate 4 refuses "strong" for a finding that rests only on models doing no better than no model at all |
 | The plan only uses what exists and is allowed | Gate 3 (`checks/plan_gate.py`) checks every column, tool, target and exclusion, and sends problems back to the planner |
 | A column that gives the answer away is left out | Gate 3 tests each column on its own against the target; the planner is told before it plans, and must exclude it |
 | Your edits to the plan are never overwritten | `agents/planner.py` will not plan again over an edited `analysis_plan.yaml` |
@@ -238,12 +248,12 @@ Rules every tool follows:
 | [pipeline/contracts/](pipeline/contracts/) | The data passed between steps, as validated models. Their validators enforce the audit rules. |
 | [pipeline/ingestion/](pipeline/ingestion/) | Loading, profiling, personal-data detection and masking, and claim checks |
 | [pipeline/ops/](pipeline/ops/) | 15 library operations, the sandboxed `custom_code` operation, and the plan executor |
-| [pipeline/agents/](pipeline/agents/) | The LLM client and the analyst, coder, reviewer and planner agents, with their prompts |
-| [pipeline/checks/](pipeline/checks/) | Gates 1, 2 and 3, the reconciliation checks and the schema contract |
+| [pipeline/agents/](pipeline/agents/) | The LLM client and the analyst, coder, reviewer, planner and analysis agents, with their prompts |
+| [pipeline/checks/](pipeline/checks/) | Gates 1 to 4, the reconciliation checks, the schema contract and the number check |
 | [pipeline/tools/](pipeline/tools/) | The reviewer's query tool, the analysis tools (statistics, charts, regressions), and the loader that prepares the clean data for analysis |
 | [pipeline/run.py](pipeline/run.py) | The one command for the whole workflow |
 | [pipeline/report_pdf.py](pipeline/report_pdf.py) | The PDF run report, rebuilt from the run folder (`python -m pipeline.report_pdf runs/<folder>`) |
-| [pipeline/ingest.py](pipeline/ingest.py), [pipeline/clean.py](pipeline/clean.py) | The commands for steps 2 and 5 |
+| [pipeline/ingest.py](pipeline/ingest.py), [pipeline/clean.py](pipeline/clean.py), [pipeline/analyze.py](pipeline/analyze.py) | The commands for steps 2, 5 and 6–7 |
 | [benchmark/](benchmark/) | The benchmark: synthetic clean data, the breakers, scenarios, the scorer and the runner |
 | [tests/fixtures/](tests/fixtures/) | Ten deliberately difficult files, with their expected results in [expected.yaml](tests/fixtures/expected.yaml) |
 
@@ -255,14 +265,14 @@ Rules every tool follows:
 | 1. Deterministic foundation | Done |
 | 2. Cleaning agents | Mostly done: analyst, coder, Gate 2, reviewer and AI decisions run end to end. Left: canary rows and a run on five public datasets. |
 | 3. Corruption benchmark | In progress: synthetic data, breakers, scorer and runner built; first results in; real messy datasets to come |
-| 4. Analysis planning and your approval | Done: the planner, Gate 3 and automatic approval. Edits to the plan take effect once the analysis step exists. |
-| 5. Analysis agent | In progress: the analysis tools are built (descriptive statistics, charts, linear and logistic regression); the agent and Gate 4 come next |
+| 4. Analysis planning and your approval | Done: the planner, Gate 3 and automatic approval; edit the plan and run `pipeline.analyze` to change it |
+| 5. Analysis agent | Done: the tools, the agent, Gate 4 and the findings in the PDF. Left: looking inside one subgroup, or crossing two groupings |
 | 6. Evaluation | Not started |
 | 7. App and publishing | Not started |
 
 ## Next
 
-1. **Analysis agent (AI) and Gate 4:** runs the plan with the tools, using your edited `analysis_plan.yaml` when there is one, and writes up the findings. Gate 4 checks every number in the write-up against the logged results, and treats a single small p-value with care.
-2. **Report, part two:** the findings, charts and regression results added to the PDF.
+1. **Subgroups:** a tool that looks inside one group, or crosses two groupings, so questions like "does sex matter as much in third class?" can be answered.
+2. **Five-dataset run:** the whole workflow on five public datasets, to see how the findings hold up on data other than Titanic.
 
-Later: canary rows (test rows with known answers, checked on every run), real messy datasets for the benchmark, and a run on five public datasets.
+Later: canary rows (test rows with known answers, checked on every run) and real messy datasets for the benchmark.
