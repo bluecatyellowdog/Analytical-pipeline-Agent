@@ -168,20 +168,21 @@ The analysis stage is being built. Its AI agent will not write code: it picks fr
 
 | Tool | Answers |
 | --- | --- |
+| `summary_table` | The basic numbers for every column: averages, spread and ranges, yes/no shares, categories, date ranges. |
 | `distribution` | How are a column's values spread? |
-| `target_rate_by_group` | How often does the outcome happen in each group or range? With 95% intervals. |
-| `compare_by_target` | How does a number differ between the two outcomes? |
+| `target_by_group` | What is the outcome in each group or range? The rate for a yes/no outcome, the average for a number, with 95% intervals. |
+| `compare_by_target` | How does a number differ between the two outcomes of a yes/no target? |
 | `correlation` | Which numbers move together? |
 | `missingness` | Where are values missing, and does that relate to the outcome? |
-| `baseline_model` | The score to beat: always guess the most common outcome. |
-| `logistic_regression` | Which features raise or lower the odds of the outcome, and by how much? |
-| `gradient_boosting` | How well can the outcome be predicted, and which features matter most? |
+| `linear_regression` | For a number outcome: how much does it change with each feature, the others held fixed? |
+| `logistic_regression` | For a yes/no outcome: how do the odds change with each feature, the others held fixed? |
 
 Rules every tool follows:
 
 - **Totals only, never rows.** Groups under 10 rows are merged or hidden.
-- **Fair model scores.** Every model is scored the same way (5-fold cross-validation) and next to the baseline. Finding no signal is a valid result.
-- **Warnings.** An AUC above 0.95 is flagged as possible leakage (a column that gives the answer away). A model that scores much better on its training data than on new data is flagged as overfitting.
+- **Classic, simple statistics.** Each regression is fitted once on all usable rows and reports 95% intervals and p-values. There is no machine learning and no cross-validation. Finding no effect is a valid result.
+- **Readable effects.** Numbers are compared in round steps ("alder per 20", "beloeb per 100,000"), and categories against the most common one.
+- **Warnings.** An almost perfect fit (R² or AUC above 0.95) is flagged as possible leakage: a column that gives the answer away. Too few rows for the number of effects is flagged as unstable.
 - **Refused as inputs:** the outcome itself, IDs, dates, free text, personal data and excluded columns.
 
 ## Guarantees, and where they are enforced
@@ -204,7 +205,7 @@ Rules every tool follows:
 | The AI never sees rows or personal data | `ingestion/compact.py` builds the masked summary; tests assert no personal value reaches any prompt |
 | The reviewer's queries reveal no one | `tools/queries.py` returns only counts and summaries, masks personal and ID values inside the query, and refuses to filter on them |
 | Error messages sent back to the AI are masked | `agents/feedback.py` |
-| Analysis results reveal no one | `tools/eda.py` and `tools/modeling.py` return only totals, rates and model scores; groups under 10 rows are merged or hidden |
+| Analysis results reveal no one | `tools/eda.py` and `tools/modeling.py` return only totals, rates and regression effects; groups under 10 rows are merged or hidden |
 
 **AI accountability**
 
@@ -242,7 +243,7 @@ Rules every tool follows:
 | 2. Cleaning agents | Mostly done: analyst, coder, Gate 2, reviewer and AI decisions run end to end. Left: canary rows and a run on five public datasets. |
 | 3. Corruption benchmark | In progress: synthetic data, breakers, scorer and runner built; first results in; real messy datasets to come |
 | 4. Analysis planning and your approval | Not started (the review part was built early, in step 5) |
-| 5. Analysis agent | In progress: the analysis tools are built (statistics, charts, a baseline and two models); the agent and Gate 4 come next |
+| 5. Analysis agent | In progress: the analysis tools are built (descriptive statistics, charts, linear and logistic regression); the agent and Gate 4 come next |
 | 6. Evaluation | Not started |
 | 7. App and publishing | Not started |
 
