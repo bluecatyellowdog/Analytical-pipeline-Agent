@@ -216,3 +216,17 @@ class TestRenameTracking:
     def test_a_dropped_column_is_not_reconciled_against(self, cleaned) -> None:
         _, _, records, _ = cleaned
         assert final_name_of("email", records) is None
+
+
+class TestShiftOnlyWhereComparable:
+    """Raw text that mostly does not read as numbers cannot be compared with clean numbers."""
+
+    def test_danish_formatted_raw_values_are_not_compared(self, store) -> None:
+        values = [[f"{1000 + i}.{i:03d},50"] for i in range(90)] + [["999"]] * 12
+        table = store.create_text_table("dk", ["v"], values, list(range(2, 104)))
+        ctx = OpContext.from_raw(store, table, RUN_ID)
+        ctx, _ = apply_op(ctx, "normalize_decimal", {"column": "v"})
+        final = finalize(ctx)
+        # Only the twelve 999 codes read as numbers in raw: comparing those with the
+        # parsed amounts would report a huge, meaningless shift.
+        assert population_stability_index(store, table.name, final, "v", "v") is None

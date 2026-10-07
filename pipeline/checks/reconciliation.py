@@ -261,6 +261,10 @@ def check_no_unexplained_nulls(records: Sequence[OpRecord]) -> CheckResult:
     )
 
 
+MIN_COMPARABLE_SHARE = 0.9
+"""A raw column is compared only when this share of its values reads as numbers."""
+
+
 def population_stability_index(
     store: RawStore,
     raw_table: str,
@@ -275,6 +279,11 @@ def population_stability_index(
     the pipeline reports the number in an audit trail, so being able to read the
     definition matters more than the dependency.
     """
+    if _numeric_share(store, raw_table, raw_column) < MIN_COMPARABLE_SHARE:
+        # Raw text that mostly does not read as numbers (Danish decimals, '1200 kr')
+        # cannot be compared with the clean numbers: only its odd plain values, such
+        # as a 999 code, would be measured, and the 'shift' would be meaningless.
+        return None
     expected = _numeric_values(store, raw_table, raw_column)
     actual = _numeric_values(store, final_table, final_column)
     if len(expected) < bins or not actual:
@@ -376,6 +385,17 @@ def _count_differing_cells(
         f"IS DISTINCT FROM CAST(b.{quote_ident(final_column)} AS VARCHAR)"
     ).fetchone()
     return int(row[0])
+
+
+def _numeric_share(store: RawStore, table: str, column: str) -> float:
+    """Share of the non-blank values in a column that read as numbers as they stand."""
+    identifier = quote_ident(column)
+    present, numeric = store.connection.execute(
+        f"SELECT count(*) FILTER (WHERE {identifier} IS NOT NULL "
+        f"AND trim(CAST({identifier} AS VARCHAR)) <> ''), "
+        f"count(TRY_CAST({identifier} AS DOUBLE)) FROM {_qualified(table)}"
+    ).fetchone()
+    return numeric / present if present else 0.0
 
 
 def _numeric_values(store: RawStore, table: str, column: str) -> list[float]:
