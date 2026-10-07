@@ -68,6 +68,22 @@ def good_diagnosis(**overrides) -> dict:
                 "fix": "Parse Danish decimals to numbers.",
                 "suggested_op": "normalize_decimal",
             },
+            {
+                "id": "I3",
+                "column": "alder",
+                "kind": "type",
+                "evidence": "type integer, coverage 1.0",
+                "fix": "Cast to integer.",
+                "suggested_op": "cast",
+            },
+            {
+                "id": "I4",
+                "column": "dato",
+                "kind": "date_format",
+                "evidence": "date_format '%d-%m-%Y'",
+                "fix": "Parse the dates.",
+                "suggested_op": "parse_dates",
+            },
         ],
         "judgment_calls": [
             {
@@ -260,3 +276,39 @@ class TestDecideMode:
         data["judgment_calls"] = [decided(data["judgment_calls"][0], "Treat 999 as missing")]
         result = diagnose(profile_llm, brief, FakeLLM([reply(data)]))
         assert result.diagnosis.judgment_calls[0].ai_decision is None
+
+
+class TestConversions:
+    """A column whose clean type differs from how it is stored needs an issue converting it."""
+
+    def test_a_type_change_without_a_converting_issue_is_sent_back(self, profile_llm, brief):
+        data = good_diagnosis()
+        data["issues"] = [i for i in data["issues"] if i["id"] != "I4"]  # nothing parses dato
+        problems = check_diagnosis(parse_reply(reply(data)), profile_llm, brief)
+        assert any("dato" in p and "date" in p and "parse_dates" in p for p in problems)
+
+    def test_a_non_converting_issue_does_not_count(self, profile_llm, brief) -> None:
+        data = good_diagnosis()
+        data["issues"] = [i for i in data["issues"] if i["id"] != "I3"]  # only tokens_to_null
+        problems = check_diagnosis(parse_reply(reply(data)), profile_llm, brief)
+        assert any("alder" in p for p in problems)
+
+    def test_columns_already_stored_with_the_right_type_need_nothing(
+        self, profile_llm, brief
+    ) -> None:
+        typed = json.loads(json.dumps(profile_llm))
+        for column in typed["columns"]:
+            if column["name"] == "dato":
+                column["stored_as"] = "DATE"
+        data = good_diagnosis()
+        data["issues"] = [i for i in data["issues"] if i["id"] != "I4"]
+        assert check_diagnosis(parse_reply(reply(data)), typed, brief) == []
+
+    def test_dropped_columns_need_no_conversion(self, profile_llm, brief) -> None:
+        data = good_diagnosis()
+        data["issues"] = [i for i in data["issues"] if i["id"] != "I4"]
+        data["columns"][3] = {"name": "dato", "role": "drop", "target_type": "date"}
+        assert check_diagnosis(parse_reply(reply(data)), profile_llm, brief) == []
+
+    def test_the_profile_says_how_each_column_is_stored(self, profile_llm) -> None:
+        assert {c["stored_as"] for c in profile_llm["columns"]} == {"text"}

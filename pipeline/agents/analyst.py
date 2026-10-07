@@ -37,6 +37,7 @@ from pipeline.agents.common import (
 )
 from pipeline.agents.decisions import DECISIONS_FILE, write_template
 from pipeline.agents.llm import LLMClient, LLMConfigError, Message, connect
+from pipeline.checks.schema import type_fits
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.diagnosis import Diagnosis
 from pipeline.ops import REGISTRY, op_names
@@ -151,6 +152,8 @@ def check_diagnosis(
         if name in actual and entry is not None and entry.role != "excluded":
             problems.append(f"the brief excludes {name!r}; give it role 'excluded'")
 
+    problems += _missing_conversions(diagnosis, profile_llm)
+
     if brief.judgment_calls == "decide":
         for call in diagnosis.judgment_calls:
             if call.ai_decision is None:
@@ -205,6 +208,36 @@ def diagnose(
         f"last problems: {attempts[-1].problems}",
         attempts,
     )
+
+
+CONVERTING_OPS = ("cast", "custom_code", "normalize_decimal", "parse_dates")
+
+
+def _missing_conversions(diagnosis: Diagnosis, profile_llm: dict[str, Any]) -> list[str]:
+    """Columns whose clean type differs from how they are stored, with no issue converting them.
+
+    Without such an issue the coder has nothing to address, so the column stays text
+    and only the reviewer would notice. Caught here, it costs a retry, not a review round.
+    """
+    stored = {c["name"]: c.get("stored_as", "text") for c in profile_llm["columns"]}
+    problems = []
+    for entry in diagnosis.columns:
+        if entry.role == "drop" or entry.name not in stored:
+            continue
+        storage = "VARCHAR" if stored[entry.name] == "text" else stored[entry.name]
+        if type_fits(entry.target_type, storage):
+            continue
+        converts = any(
+            issue.column == entry.name and issue.suggested_op in CONVERTING_OPS
+            for issue in diagnosis.issues
+        )
+        if not converts:
+            problems.append(
+                f"column {entry.name!r} is stored as {stored[entry.name]} but should become "
+                f"{entry.target_type}, and no issue converts it; add an issue (kind 'type') "
+                f"with suggested_op {', '.join(CONVERTING_OPS)}"
+            )
+    return problems
 
 
 def _without_ai_decisions(diagnosis: Diagnosis) -> Diagnosis:

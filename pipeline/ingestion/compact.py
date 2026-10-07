@@ -51,6 +51,7 @@ def compact_column(column: ColumnProfile) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "name": column.name,
         "type": proposal.proposed,
+        "stored_as": column.raw_dtype,
         "coverage": round(proposal.coverage, 3),
         "missing": f"{column.missing_share:.1%}",
         "distinct": column.n_distinct,
