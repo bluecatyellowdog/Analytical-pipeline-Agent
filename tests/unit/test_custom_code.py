@@ -239,3 +239,30 @@ class TestSecondLayer:
 
 def _transform_only(code: str) -> list[str]:
     return [] if "def transform" in code else ["no transform"]
+
+
+class TestTypesSurviveTheRoundTrip:
+    """pandas turns DATE into datetime64; untouched columns must come back with their own type."""
+
+    def test_custom_code_after_parsed_dates_leaves_them_as_dates(self, store) -> None:
+        raw = store.create_text_table(
+            "d",
+            ["dato", "beloeb"],
+            [["03-04-2021", "10"], ["15-07-2021", "20"]],
+            [2, 3],
+        )
+        ctx = OpContext.from_raw(store, raw, RUN_ID)
+        ctx, _ = apply_op(ctx, "parse_dates", {"column": "dato", "format": "%d-%m-%Y"})
+        ctx, _ = apply_op(ctx, "cast", {"column": "beloeb", "to": "integer"})
+        code = "def transform(df):\n    df['dobbelt'] = df['beloeb'] * 2\n    return df\n"
+        ctx, record = custom(ctx, code, adds=["dobbelt"])
+
+        types = store.column_types_of(ctx.table)
+        assert types["dato"] == "DATE"
+        assert types["beloeb"] == "BIGINT"
+        assert record.cells_changed == {}
+
+    def test_a_real_type_change_still_has_to_be_declared(self, ctx) -> None:
+        code = "def transform(df):\n    df['by'] = df['by'].str.len()\n    return df\n"
+        with pytest.raises(OpError, match="undeclared.*by"):
+            custom(ctx, code)

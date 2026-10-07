@@ -186,12 +186,63 @@ def run_transform(
         if completed.returncode != 0 or not output_path.exists():
             raise SandboxError(_error_from(completed.stderr))
 
+        output = f"read_parquet('{output_path.as_posix()}')"
+        columns_sql = ", ".join(
+            _restored_type(store, output, source_table, name, out_type)
+            for name, out_type in _types(store, f"SELECT * FROM {output}").items()
+            if name != ROW_ID
+        )
         store.connection.execute(
             f"CREATE TABLE {output_table} AS "
-            f"SELECT o.{ROW_ID}, s._source_line, o.* EXCLUDE ({ROW_ID}) "
-            f"FROM read_parquet('{output_path.as_posix()}') o "
+            f"SELECT o.{ROW_ID}, s._source_line, {columns_sql} "
+            f"FROM {output} o "
             f"JOIN {source_table} s USING ({ROW_ID}) ORDER BY o.{ROW_ID}"
         )
+
+
+_INTEGER_TYPES = ("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT", "UTINYINT", "USMALLINT")
+_INTEGER_TYPES += ("UINTEGER", "UBIGINT")
+
+
+def _round_trip_shift(source_type: str, output_type: str) -> bool:
+    """Type pairs pandas produces on its own: DATE comes back as a timestamp, and so on."""
+    source, output = source_type.upper(), output_type.upper()
+    if source == output:
+        return False
+    if source in ("DATE",) or source.startswith("TIMESTAMP"):
+        return output.startswith("TIMESTAMP")
+    if source.startswith(_INTEGER_TYPES):
+        return output.startswith(_INTEGER_TYPES) or output in ("DOUBLE", "FLOAT")
+    if source.startswith("DECIMAL") or source in ("FLOAT", "REAL"):
+        return output in ("DOUBLE", "FLOAT")
+    return False
+
+
+def _restored_type(
+    store: RawStore, output: str, source_table: str, name: str, output_type: str
+) -> str:
+    """A column's own type back, when only the trip through pandas changed it.
+
+    The code ran on a pandas DataFrame, which has no DATE type and turns integer
+    columns with gaps into floats. Without this, every column would come back
+    subtly retyped and be refused as an undeclared change. The original type is
+    restored only when no value changes by it; a real type change stays, and must
+    be declared like any other.
+    """
+    column = quote_ident(name)
+    source_type = _types(store, f"SELECT * FROM {source_table}").get(name)
+    if source_type is None or not _round_trip_shift(source_type, output_type):
+        return f"o.{column}"
+    lossy = store.connection.execute(
+        f"SELECT count(*) FROM {output} WHERE {column} IS NOT NULL AND "
+        f"(TRY_CAST({column} AS {source_type}) IS NULL OR "
+        f"CAST(TRY_CAST({column} AS {source_type}) AS {output_type}) IS DISTINCT FROM {column})"
+    ).fetchone()[0]
+    return f"o.{column}" if lossy else f"CAST(o.{column} AS {source_type}) AS {column}"
+
+
+def _types(store: RawStore, query: str) -> dict[str, str]:
+    return {row[0]: row[1] for row in store.connection.execute(f"DESCRIBE {query}").fetchall()}
 
 
 def _error_from(stderr: str) -> str:
