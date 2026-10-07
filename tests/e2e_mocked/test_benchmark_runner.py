@@ -117,3 +117,20 @@ def test_scores_are_read_from_parquet_with_real_types(tmp_path) -> None:
     path = tmp_path / "clean_data.parquet"
     duckdb.from_df(frame).write_parquet(path.as_posix())
     assert load_clean_rows(path) == [{"_source_line": 2, "alder": 31, "region": "Nord"}]
+
+
+def test_a_finished_benchmark_can_be_rescored_without_running_it_again(tmp_path) -> None:
+    from benchmark.run_benchmark import rescore
+
+    data = make_loans(rows=80, seed=1)
+    first = run_benchmark(
+        ["manual_entry"],
+        data=data,
+        seed=3,
+        out_dir=tmp_path,
+        pipeline=perfect_pipeline(data),
+        meta={"seed": 3, "rows": 80},
+    )
+    again = rescore(tmp_path)
+    assert [r.score.repair_rate for r in again] == [r.score.repair_rate for r in first]
+    assert again[0].info.review == "accepted"

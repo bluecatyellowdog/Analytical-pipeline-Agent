@@ -141,10 +141,12 @@ def _currency_suffix(c, data, rng, *, column, suffix=" kr") -> Injection:
 def _outliers(c, data, rng, *, column, share=0.01, factor=1000) -> Injection:
     rows = c.pick(rng, column, share)
     kind = data.kinds[column]
+    values = []
     for row in rows:
         value = data.frame.loc[c.origin[row], column] * factor
         c.table.loc[row, column] = to_text(value, kind)
-    return Injection("outliers", column, rows, "flag", {"factor": factor})
+        values.append(float(value))
+    return Injection("outliers", column, rows, "flag", {"factor": factor, "values": values})
 
 
 def _duplicates(c, data, rng, *, share=0.03) -> Injection:

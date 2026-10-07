@@ -142,6 +142,26 @@ Command options:
   - `--no-review` skips the reviewer
 - `pipeline.run` also takes `--brief`, `--sheet`, `--out` and `--seed`, as ingest does
 
+## Measuring it: the benchmark
+
+How good is the cleaning, really? The benchmark breaks clean data on purpose, runs the pipeline on it exactly as a user would, and scores the result against an answer key.
+
+```powershell
+uv run python -m benchmark.run_benchmark                       # all scenarios
+uv run python -m benchmark.run_benchmark --scenarios mixed --no-review
+```
+
+1. **Clean data with known answers:** a generated loan table (IDs with leading zeros, ages, incomes, amounts, Danish regions, dates, fees, a default flag), the same every time for a given seed.
+2. **Planted problems, with an answer key:** Danish decimal commas, day-first or US dates, `NA`/`-`/`?` for missing values, a documented 999 code, stray spaces and mixed case, `kr` after numbers, values a thousand times too large, duplicate rows, and a column that gives the answer away.
+3. **Scenarios** mix these the way real sources do: `danish_export`, `manual_entry`, `mixed`.
+4. **Scores:**
+   - **found:** the diagnosis named the problem
+   - **fixed:** the cell has its right value back
+   - **false alarms:** problems raised where none were planted
+   - **damage:** good cells changed, or good rows dropped
+
+Results go to `runs/benchmark_<timestamp>/summary.md`, with each case's run folder and PDF next to it. A run of all three scenarios costs about $1.50–2 with Claude Opus.
+
 ## Guarantees, and where they are enforced
 
 **Data safety**
@@ -186,6 +206,7 @@ Command options:
 | [pipeline/run.py](pipeline/run.py) | The one command for the whole workflow |
 | [pipeline/report_pdf.py](pipeline/report_pdf.py) | The PDF run report, rebuilt from the run folder (`python -m pipeline.report_pdf runs/<folder>`) |
 | [pipeline/ingest.py](pipeline/ingest.py), [pipeline/clean.py](pipeline/clean.py) | The commands for steps 2 and 5 |
+| [benchmark/](benchmark/) | The benchmark: synthetic clean data, the breakers, scenarios, the scorer and the runner |
 | [tests/fixtures/](tests/fixtures/) | Ten deliberately difficult files, with their expected results in [expected.yaml](tests/fixtures/expected.yaml) |
 
 ## Status
@@ -195,7 +216,7 @@ Command options:
 | 0. Contracts and setup | Done, except tracing and the GitHub Pages workflow |
 | 1. Deterministic foundation | Done |
 | 2. Cleaning agents | Mostly done: analyst, coder, Gate 2, reviewer and AI decisions run end to end. Left: canary rows and a run on five public datasets. |
-| 3. Corruption benchmark | Not started |
+| 3. Corruption benchmark | In progress: synthetic data, breakers, scorer and runner built; first results in; real messy datasets to come |
 | 4. Analysis planning and your approval | Not started (the review part was built early, in step 5) |
 | 5. Analysis agent | Not started |
 | 6. Evaluation | Not started |

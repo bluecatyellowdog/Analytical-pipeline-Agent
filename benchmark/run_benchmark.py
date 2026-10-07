@@ -164,7 +164,34 @@ def run_benchmark(
         (case_dir / "score.json").write_text(
             json.dumps(_case_json(results[-1]), indent=1), encoding="utf-8"
         )
-    write_summary(results, out_dir, meta or {})
+    provenance = {"seed": seed, "data_seed": data.seed, "rows": len(data.frame)}
+    write_summary(results, out_dir, {**provenance, **(meta or {})})
+    return results
+
+
+def rescore(out_dir: Path) -> list[CaseResult]:
+    """Score a finished benchmark again, e.g. after the scorer changed. No LLM calls."""
+    summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+    meta = summary["meta"]
+    data = make_loans(rows=int(meta["rows"]), seed=int(meta.get("data_seed", meta["seed"])))
+    results = []
+    for case_json in summary["cases"]:
+        scenario = SCENARIOS[case_json["scenario"]]
+        case_dir = out_dir / scenario.name
+        case = build_case(scenario, data, seed=int(meta["seed"]), case_dir=case_dir)
+        info = RunInfo(
+            run_dir=case_dir / "run",
+            stopped_at=case_json["stopped_at"],
+            cost_usd=case_json["cost_usd"],
+            gate_2=case_json["gate_2"],
+            review=case_json["review"],
+        )
+        score = score_run(case, data, info)
+        results.append(CaseResult(scenario.name, scenario.description, score, info))
+        (case_dir / "score.json").write_text(
+            json.dumps(_case_json(results[-1]), indent=1), encoding="utf-8"
+        )
+    write_summary(results, out_dir, meta)
     return results
 
 
@@ -334,9 +361,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--rows", type=int, default=300)
     parser.add_argument("--no-review", action="store_true")
-    parser.add_argument("--budget", type=float, default=0.50)
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=1.00,
+        help="Per case; above the $0.50 product target so review rounds can finish",
+    )
+    parser.add_argument("--rescore", help="Score a finished benchmark folder again; no LLM calls")
     parser.add_argument("--out", help="Output folder (default: runs/benchmark_<timestamp>)")
     args = parser.parse_args(argv)
+
+    if args.rescore:
+        for result in rescore(Path(args.rescore)):
+            _print_line(result)
+        print(f"\nSummary: {(Path(args.rescore) / 'summary.md').resolve()}")
+        return 0
 
     names = [n.strip() for n in args.scenarios.split(",") if n.strip()]
     unknown = [n for n in names if n not in SCENARIOS]
@@ -377,15 +416,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     print()
     for result in results:
-        score = result.score
-        print(
-            f"{result.scenario:14} found {score.detection_rate:.0%}, "
-            f"fixed {score.repair_rate:.0%}, "
-            f"damaged {score.damaged_cells}, dropped {score.wrongly_dropped_rows}, "
-            f"false alarms {len(score.false_alarms)}, ${result.info.cost_usd:.2f}"
-        )
+        _print_line(result)
     print(f"\nSummary: {(out_dir / 'summary.md').resolve()}")
     return 0
+
+
+def _print_line(result: CaseResult) -> None:
+    score = result.score
+    print(
+        f"{result.scenario:14} found {score.detection_rate:.0%}, "
+        f"fixed {score.repair_rate:.0%}, "
+        f"damaged {score.damaged_cells}, dropped {score.wrongly_dropped_rows}, "
+        f"false alarms {len(score.false_alarms)}, ${result.info.cost_usd:.2f}"
+    )
 
 
 if __name__ == "__main__":

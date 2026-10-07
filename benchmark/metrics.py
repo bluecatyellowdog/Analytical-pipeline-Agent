@@ -18,6 +18,7 @@ from __future__ import annotations
 import datetime as dt
 import math
 import numbers
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
@@ -65,7 +66,19 @@ _WORDS = {
     "date_format": ("date", "format"),
     "whitespace_case": ("case", "spelling", "space", "variant"),
     "currency_suffix": (" kr", "kr.", "currency", "suffix"),
-    "outliers": ("outlier", "extreme", "implausib", "unrealistic", "too large", "1000"),
+    "outliers": (
+        "outlier",
+        "extreme",
+        "implausib",
+        "unrealistic",
+        "impossible",
+        "too large",
+        "too high",
+        "exceed",
+        "thousand",
+        "unit error",
+        "magnitude",
+    ),
     "leaky_column": ("leak", "target", "outcome", "after the"),
 }
 
@@ -258,6 +271,8 @@ def _matches(item: Issue | JudgmentCall, injection: Injection) -> bool:
     if injection.kind == "sentinel":
         words += [str(injection.detail.get("code", "")), "sentinel", "code"]
     hinted = any(word and word in text for word in words)
+    if injection.kind == "outliers":
+        hinted = hinted or _quotes_any(text, injection.detail.get("values", []))
     if not is_issue:
         return hinted
     return (
@@ -265,6 +280,26 @@ def _matches(item: Issue | JudgmentCall, injection: Injection) -> bool:
         or op in _ISSUE_OPS.get(injection.kind, set())
         or (injection.kind in {"currency_suffix", "leaky_column", "sentinel"} and hinted)
     )
+
+
+_NUMBER = re.compile(r"\d[\d.,]*\d|\d")
+
+
+def _quotes_any(text: str, values: list[float]) -> bool:
+    """Does the text mention one of these numbers, written in any common style?
+
+    '1,647,000', '1.647.000', '1647000' and '1647000.00' all count as 1647000.
+    """
+    for token in _NUMBER.findall(text):
+        candidates = {token.replace(",", ""), token.replace(".", "").replace(",", ".")}
+        for candidate in candidates:
+            try:
+                number = float(candidate)
+            except ValueError:
+                continue
+            if any(abs(number - value) < 0.5 for value in values):
+                return True
+    return False
 
 
 def _describe(item: Issue | JudgmentCall) -> str:

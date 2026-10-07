@@ -30,6 +30,8 @@ class CleanDataset:
     description: str
     goal: str
     column_notes: list[dict[str, str]] = field(default_factory=list)
+    seed: int = 0
+    """The seed the data was generated from, so a benchmark can be scored again later."""
 
 
 def make_loans(rows: int = 500, seed: int = 0) -> CleanDataset:
@@ -76,6 +78,7 @@ def make_loans(rows: int = 500, seed: int = 0) -> CleanDataset:
             "system. Amounts, income and fees are in DKK."
         ),
         goal="Understand which applicant characteristics are associated with default.",
+        seed=seed,
         column_notes=[
             {"name": "kunde_id", "description": "Customer number. Has leading zeros."},
             {"name": "alder", "description": "Applicant age in years."},

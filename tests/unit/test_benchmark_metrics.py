@@ -145,3 +145,18 @@ class TestFinding:
         score = score_case(data, corrupted, perfect_rows(data, corrupted), noisy)
         assert any("oprettet" in alarm for alarm in score.false_alarms)
         assert not any("beloeb" in alarm for alarm in score.false_alarms)
+
+
+def test_an_outlier_counts_as_found_when_the_ai_quotes_a_planted_value(setup) -> None:
+    """From the first real run: the AI called the fees 'impossible' without saying 'outlier'."""
+    data, corrupted = setup
+    planted = next(i for i in corrupted.injections if i.kind == "outliers")
+    value = int(float(corrupted.table.loc[planted.rows[0], "gebyr"]))
+    question = (
+        f"The fee maximum of {value:,} DKK exceeds even the largest loan. "
+        f"How should these fees be handled?"
+    )
+    found = diagnosis(calls=[{"column": "gebyr", "question": question}])
+    score = score_case(data, corrupted, perfect_rows(data, corrupted), found)
+    assert next(s for s in score.injections if s.kind == "outliers").found
+    assert score.false_alarms == []
