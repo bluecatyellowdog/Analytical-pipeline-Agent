@@ -21,6 +21,8 @@ More detail: [specification](docs/project_spec.pdf) · [working rules](CLAUDE.md
 | 5. Clean | AI: coder and reviewer | The coder writes a cleaning plan, which runs step by step from the original data. **Gate 2** checks the result. The reviewer checks that it makes sense and can send fixes back, at most twice. | `pipeline.clean` |
 | 6. Read the report | You | `cleaning_report.md` shows what changed, what the AI decided and what needs your attention. To change something, edit `decisions.yaml` and run step 5 again. | – |
 
+Steps 2, 3 and 5 run in one go with `pipeline.run`; the separate commands do the same work one step at a time.
+
 Not built yet: plan the analysis → you approve the plan → run the analysis (charts, models, explanations) → final report → optional public dashboard.
 
 ### Gates
@@ -46,7 +48,15 @@ uv run pytest
 
 **2. Add an LLM key.** Copy `.env.example` to `.env` and fill in `LLM_API_KEY=`. Keys from OpenRouter, Anthropic, OpenAI, Gemini, Groq and xAI are recognised automatically.
 
-**3. Run the example**, a small Danish loan file from the test set:
+**3. Run the example**, a small Danish loan file from the test set, in one command:
+
+```powershell
+uv run python -m pipeline.run tests/fixtures/danish_semicolon.csv --brief examples/context_brief.yaml
+```
+
+It ingests, diagnoses and cleans the file, then prints a short summary ending with the report to open. `runs/index.md` lists every run.
+
+Or step by step, which does exactly the same:
 
 ```powershell
 uv run python -m pipeline.ingest tests/fixtures/danish_semicolon.csv --brief examples/context_brief.yaml
@@ -54,9 +64,7 @@ uv run python -m pipeline.agents.analyst runs/<run folder>
 uv run python -m pipeline.clean runs/<run folder>
 ```
 
-The first command prints the run folder, e.g. `runs/danish_semicolon_20261006-153000`. `runs/index.md` lists every run.
-
-Step 2 is free. Steps 3 and 5 call the LLM: a small dataset costs about $0.40–0.65 with Claude Opus. See [Settings](#settings) to make it cheaper.
+Ingesting is free. Diagnosing and cleaning call the LLM: a small dataset costs about $0.40–0.65 with Claude Opus. If Gate 1 blocks the file, the run stops before any LLM call. See [Settings](#settings) to make it cheaper.
 
 ## The brief
 
@@ -128,9 +136,10 @@ Command options:
   - `--sheet` picks an Excel sheet
   - `--db` keeps the database in a file
   - `--seed` sets the random seed for profiling
-- `pipeline.clean`:
-  - `--budget` (default $0.50) stops between review rounds once a run has spent that much
+- `pipeline.clean` and `pipeline.run`:
+  - `--budget` (default $0.50) stops between review rounds once cleaning has spent that much
   - `--no-review` skips the reviewer
+- `pipeline.run` also takes `--brief`, `--sheet`, `--out` and `--seed`, as ingest does
 
 ## Guarantees, and where they are enforced
 
@@ -173,6 +182,7 @@ Command options:
 | [pipeline/agents/](pipeline/agents/) | The LLM client and the analyst, coder and reviewer agents, with their prompts |
 | [pipeline/checks/](pipeline/checks/) | Gates 1 and 2, the reconciliation checks and the schema contract |
 | [pipeline/tools/](pipeline/tools/) | The reviewer's query tool |
+| [pipeline/run.py](pipeline/run.py) | The one command for the whole workflow |
 | [pipeline/ingest.py](pipeline/ingest.py), [pipeline/clean.py](pipeline/clean.py) | The commands for steps 2 and 5 |
 | [tests/fixtures/](tests/fixtures/) | Ten deliberately difficult files, with their expected results in [expected.yaml](tests/fixtures/expected.yaml) |
 
