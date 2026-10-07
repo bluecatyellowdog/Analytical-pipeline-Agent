@@ -23,7 +23,7 @@ More detail: [specification](docs/project_spec.pdf) · [working rules](CLAUDE.md
 
 Steps 2, 3 and 5 run in one go with `pipeline.run`; the separate commands do the same work one step at a time.
 
-Not built yet: plan the analysis → you approve the plan → run the analysis (charts, models, explanations) → final report → optional public dashboard.
+Not built yet: plan the analysis → you approve the plan → run the analysis → final report → optional public dashboard. The tools the analysis will use are built: see [Analysis tools](#analysis-tools).
 
 ### Gates
 
@@ -162,6 +162,28 @@ uv run python -m benchmark.run_benchmark --scenarios mixed --no-review
 
 Results go to `runs/benchmark_<timestamp>/summary.md`, with each case's run folder and PDF next to it. A run of all three scenarios costs about $1.50–2 with Claude Opus.
 
+## Analysis tools
+
+The analysis stage is being built. Its AI agent will not write code: it picks from a fixed set of tested tools, and every result is saved with a pointer to the call that made it.
+
+| Tool | Answers |
+| --- | --- |
+| `distribution` | How are a column's values spread? |
+| `target_rate_by_group` | How often does the outcome happen in each group or range? With 95% intervals. |
+| `compare_by_target` | How does a number differ between the two outcomes? |
+| `correlation` | Which numbers move together? |
+| `missingness` | Where are values missing, and does that relate to the outcome? |
+| `baseline_model` | The score to beat: always guess the most common outcome. |
+| `logistic_regression` | Which features raise or lower the odds of the outcome, and by how much? |
+| `gradient_boosting` | How well can the outcome be predicted, and which features matter most? |
+
+Rules every tool follows:
+
+- **Totals only, never rows.** Groups under 10 rows are merged or hidden.
+- **Fair model scores.** Every model is scored the same way (5-fold cross-validation) and next to the baseline. Finding no signal is a valid result.
+- **Warnings.** An AUC above 0.95 is flagged as possible leakage (a column that gives the answer away). A model that scores much better on its training data than on new data is flagged as overfitting.
+- **Refused as inputs:** the outcome itself, IDs, dates, free text, personal data and excluded columns.
+
 ## Guarantees, and where they are enforced
 
 **Data safety**
@@ -182,6 +204,7 @@ Results go to `runs/benchmark_<timestamp>/summary.md`, with each case's run fold
 | The AI never sees rows or personal data | `ingestion/compact.py` builds the masked summary; tests assert no personal value reaches any prompt |
 | The reviewer's queries reveal no one | `tools/queries.py` returns only counts and summaries, masks personal and ID values inside the query, and refuses to filter on them |
 | Error messages sent back to the AI are masked | `agents/feedback.py` |
+| Analysis results reveal no one | `tools/eda.py` and `tools/modeling.py` return only totals, rates and model scores; groups under 10 rows are merged or hidden |
 
 **AI accountability**
 
@@ -192,6 +215,7 @@ Results go to `runs/benchmark_<timestamp>/summary.md`, with each case's run fold
 | The clean data is what the diagnosis said it would be | Gate 2's schema contract (`checks/schema.py`); later stages re-check the data file against it |
 | The reviewer's claims are backed by numbers | `agents/reviewer.py` drops claims citing numbers it was never shown and needs two verified checks to accept |
 | Questions only you can answer reach you | The reviewer reports them in the report; nothing it says can change a decision |
+| Every analysis result can be traced | Each one is saved as an artifact pointing to the tool call and the plan question behind it (`tools/registry.py`) |
 
 ## Project layout
 
@@ -202,7 +226,7 @@ Results go to `runs/benchmark_<timestamp>/summary.md`, with each case's run fold
 | [pipeline/ops/](pipeline/ops/) | 15 library operations, the sandboxed `custom_code` operation, and the plan executor |
 | [pipeline/agents/](pipeline/agents/) | The LLM client and the analyst, coder and reviewer agents, with their prompts |
 | [pipeline/checks/](pipeline/checks/) | Gates 1 and 2, the reconciliation checks and the schema contract |
-| [pipeline/tools/](pipeline/tools/) | The reviewer's query tool |
+| [pipeline/tools/](pipeline/tools/) | The reviewer's query tool, and the analysis tools: statistics, charts and models |
 | [pipeline/run.py](pipeline/run.py) | The one command for the whole workflow |
 | [pipeline/report_pdf.py](pipeline/report_pdf.py) | The PDF run report, rebuilt from the run folder (`python -m pipeline.report_pdf runs/<folder>`) |
 | [pipeline/ingest.py](pipeline/ingest.py), [pipeline/clean.py](pipeline/clean.py) | The commands for steps 2 and 5 |
@@ -218,13 +242,15 @@ Results go to `runs/benchmark_<timestamp>/summary.md`, with each case's run fold
 | 2. Cleaning agents | Mostly done: analyst, coder, Gate 2, reviewer and AI decisions run end to end. Left: canary rows and a run on five public datasets. |
 | 3. Corruption benchmark | In progress: synthetic data, breakers, scorer and runner built; first results in; real messy datasets to come |
 | 4. Analysis planning and your approval | Not started (the review part was built early, in step 5) |
-| 5. Analysis agent | Not started |
+| 5. Analysis agent | In progress: the analysis tools are built (statistics, charts, a baseline and two models); the agent and Gate 4 come next |
 | 6. Evaluation | Not started |
 | 7. App and publishing | Not started |
 
 ## Next
 
-1. **Canary rows:** test rows with known correct answers, added and checked on every run.
-2. **Analyst fix:** raise an issue for every column whose type has to change, so the reviewer does not have to catch it.
-3. **Five-dataset run:** run the full workflow on five public datasets, Titanic among them.
-4. **Phase 3:** deliberately break clean datasets and measure how much the agents catch and fix correctly, including whether the reviewer is worth its cost (`--no-review` gives the comparison).
+1. **Planner (AI) and Gate 3:** turns your question and the clean data's summary into 3–5 analysis questions, each answered with tools from the list above. Gate 3 checks that every column and tool in the plan exists.
+2. **Your approval:** approve or edit the plan, or let it run straight through.
+3. **Analysis agent (AI) and Gate 4:** runs the plan with the tools and writes up the findings. Gate 4 checks every number in the write-up against the logged results.
+4. **Report, part two:** the findings, charts and model results added to the PDF.
+
+Later: canary rows (test rows with known answers, checked on every run), real messy datasets for the benchmark, and a run on five public datasets.
