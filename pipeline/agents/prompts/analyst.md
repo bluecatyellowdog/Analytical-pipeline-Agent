@@ -13,7 +13,7 @@ Your task: decide what has to happen to each column so the data is ready for the
 - columns: exactly one entry for every column in the profile, with its role and the type it should have when clean:
   - role "target" for the brief's target column; "excluded" for every column the brief excludes; "identifier" for IDs; "drop" only when a column is useless for any analysis (e.g. completely empty); otherwise "feature".
   - target_type is the type the column should be converted to. Keep identifiers as "id" (text), so leading zeros survive.
-  - "stored_as" in the profile is how a column is stored now ("text" for CSV and Excel files). Every column whose target_type differs from it needs an issue of kind "type" (or "decimal_format" / "date_format") whose suggested_op converts it: cast, normalize_decimal, parse_dates or custom_code. Without one, nothing converts the column.
+  - "stored_as" in the profile is how a column is stored now ("text" for CSV and Excel files). Every column whose target_type differs from it needs an issue of kind "type" (or "decimal_format" / "date_format") whose suggested_op converts it: cast, normalize_decimal, parse_dates or custom_code. Without one, nothing converts the column. Columns whose target_type is "categorical", "text" or "id" are already right when stored as text: raise no type issue for them.
 
 Rules:
 - Never impute the target column, and never suggest an op that fills it in.
