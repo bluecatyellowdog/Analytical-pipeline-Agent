@@ -15,7 +15,7 @@ from pydantic import Field, model_validator
 from pipeline.contracts.common import Flag, Strict, new_id, utcnow
 
 ArtifactKind = Literal["chart", "table", "metric", "finding"]
-AuditRefKind = Literal["op", "gate", "check", "model", "plan_question", "claim"]
+AuditRefKind = Literal["op", "gate", "check", "model", "plan_question", "claim", "tool"]
 
 
 class AuditRef(Strict):
