@@ -1,11 +1,12 @@
-"""The whole workflow in one command: ingest, diagnose, clean.
+"""The whole workflow in one command: ingest, diagnose, clean, plan the analysis.
 
     uv run python -m pipeline.run data/raw/Titanic-Dataset.csv --brief examples/titanic_brief.yaml
 
-Runs the three steps back to back into one run folder and ends with a short
-summary saying where the report is. It stops early only when a step cannot go
-on: Gate 1 blocks the file (before any LLM call, so it costs nothing), the
-analyst gives no usable diagnosis, or the coder no plan that runs. Each step is
+Runs the steps back to back into one run folder and ends with a short summary
+saying where the report is. It stops early only when a step cannot go on: Gate 1
+blocks the file (before any LLM call, so it costs nothing), the analyst gives no
+usable diagnosis, the coder no plan that runs, or no analysis plan passes Gate 3.
+When Gate 2 keeps the clean data back, there is nothing to plan. Each step is
 the same code as its own command, so the run folder is the same either way.
 """
 
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from pipeline import clean
-from pipeline.agents import analyst
+from pipeline.agents import analyst, planner
 from pipeline.agents.coder import CoderError
 from pipeline.agents.decisions import DecisionsError
 from pipeline.agents.llm import LLMClient, LLMConfigError, connect
@@ -28,6 +29,7 @@ from pipeline.ingest import INDEX_FILENAME, IngestionResult, default_out_dir, in
 from pipeline.ingestion.raw import RawStore
 from pipeline.report import REPORT_FILENAME
 from pipeline.report_pdf import PDF_FILENAME, build_pdf
+from pipeline.tools.context import AnalysisInputError
 
 
 @dataclass
@@ -35,17 +37,17 @@ class RunSummary:
     run_dir: Path
     ingestion: IngestionResult
     stopped_at: str | None = None
-    """'ingest', 'diagnosis' or 'cleaning' when a step could not go on; None otherwise."""
+    """'ingest', 'diagnosis', 'cleaning' or 'planning' when a step could not go on."""
     reason: str | None = None
     diagnosis: analyst.AnalystResult | None = None
     cleaning: clean.CleaningOutcome | None = None
+    planning: planner.PlannerResult | None = None
     pdf_error: str | None = None
 
     @property
     def cost_usd(self) -> float:
-        diagnosis = self.diagnosis.cost_usd if self.diagnosis else 0.0
-        cleaning = self.cleaning.cost_usd if self.cleaning else 0.0
-        return diagnosis + cleaning
+        steps = (self.diagnosis, self.cleaning, self.planning)
+        return sum(step.cost_usd for step in steps if step is not None)
 
 
 def run_all(
@@ -72,6 +74,7 @@ def _run_steps(
     review_client: LLMClient | None = None,
     review_provider: dict[str, str] | None = None,
     reviewing: bool = True,
+    planning: bool = True,
     budget_usd: float = clean.DEFAULT_BUDGET_USD,
     out: str | Path | None = None,
     sheet: str | None = None,
@@ -119,6 +122,17 @@ def _run_steps(
 
     if out is None:
         _link_in_index(run_dir, "cleaning", clean.CLEANING_REPORT)
+    if summary.cleaning.result.blocked or not planning:
+        return summary
+
+    try:
+        summary.planning = planner.run_on_folder(run_dir, client, provider)
+    except planner.PlannerError as error:
+        summary.stopped_at = "planning"
+        summary.reason = f"{error} Every attempt is logged in {planner.PLANNER_LOG}."
+    except AnalysisInputError as error:
+        summary.stopped_at = "planning"
+        summary.reason = str(error)
     return summary
 
 
@@ -172,17 +186,30 @@ def summarise(summary: RunSummary) -> str:
         if outcome.status not in {"not_reviewed", "blocked"}
         else "Review: not run."
     )
-    lines += [
+    lines.append(
         f"3. Clean     Gate 2: {result.gate.outcome.upper()}. {review} "
-        f"{len(result.plan.steps)} step(s). ${outcome.cost_usd:.2f}",
-        f"   Total LLM cost: ${summary.cost_usd:.2f}",
-    ]
+        f"{len(result.plan.steps)} step(s). ${outcome.cost_usd:.2f}"
+    )
     lines += [f"   Note: {note}" for note in outcome.notes]
+    if summary.planning is not None:
+        plan = summary.planning.plan
+        closed = sum(not q.feasible for q in plan.questions)
+        lines.append(
+            f"4. Plan      {len(plan.questions)} question(s), {closed} marked not possible. "
+            f"Gate 3: {summary.planning.gate.outcome.upper()}, approved automatically. "
+            f"${summary.planning.cost_usd:.2f}"
+        )
+    lines.append(f"   Total LLM cost: ${summary.cost_usd:.2f}")
+    if summary.stopped_at == "planning":
+        lines += ["", f"Stopped: {summary.reason}"]
+
     lines += ["", f"Report:     {(folder / clean.CLEANING_REPORT).resolve()}"]
     if result.blocked:
         lines.append("No clean data was written; the report says why.")
     else:
         lines.append(f"Clean data: {(folder / clean.CLEAN_CSV).resolve()}")
+    if summary.planning is not None:
+        lines.append(f"Plan:       {(folder / planner.PLAN_YAML).resolve()} (edit to change it)")
     return "\n".join(lines)
 
 
@@ -204,7 +231,7 @@ def _link_in_index(run_dir: Path, label: str, filename: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m pipeline.run",
-        description="Ingest, diagnose and clean one file in one go.",
+        description="Ingest, diagnose, clean and plan the analysis of one file in one go.",
     )
     parser.add_argument("source", help="CSV, Excel, Parquet or JSON file")
     parser.add_argument("--brief", help="Context brief YAML (see examples/)")

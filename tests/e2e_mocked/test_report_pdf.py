@@ -19,6 +19,7 @@ from pipeline.agents.llm import FakeLLM
 from pipeline.report_pdf import PDF_FILENAME, build_pdf
 from pipeline.run import run_all, summarise
 from tests.unit.test_coder import DIAGNOSIS, GOOD_STEPS, plan_json, step
+from tests.unit.test_planner import FIXTURE_PLAN_REPLY
 
 pytestmark = pytest.mark.e2e
 
@@ -68,7 +69,9 @@ def pdf_text(path) -> str:
 
 @pytest.fixture
 def full_run(workspace):
-    llm = FakeLLM([DIAGNOSIS.model_dump_json(), plan_json([*GOOD_STEPS, CUSTOM])])
+    llm = FakeLLM(
+        [DIAGNOSIS.model_dump_json(), plan_json([*GOOD_STEPS, CUSTOM]), FIXTURE_PLAN_REPLY]
+    )
     summary = run_all("loans.csv", "brief.yaml", llm, review_client=FakeLLM([VERDICT]))
     return summary
 
@@ -81,8 +84,21 @@ class TestAFullRun:
 
     def test_the_summary_comes_first(self, full_run) -> None:
         first_page = PdfReader(full_run.run_dir / PDF_FILENAME).pages[0].extract_text()
-        for expected in ("Summary", "Gate 1", "Gate 2", "Review", "12"):
+        for expected in ("Summary", "Gate 1", "Gate 2", "Review", "Gate 3", "12"):
             assert expected in first_page, expected
+
+    def test_the_analysis_plan_is_shown_with_how_to_change_it(self, full_run) -> None:
+        text = pdf_text(full_run.run_dir / PDF_FILENAME)
+        for expected in (
+            "The analysis plan",
+            "Understand what goes with loan size.",
+            "not possible: Only 12 rows.",
+            "email (brief): Excluded by the brief.",
+            "approved automatically",
+            "analysis_plan.yaml",
+            "Gate 3 checks",
+        ):
+            assert expected in text, expected
 
     def test_every_part_of_the_story_is_there(self, full_run) -> None:
         text = pdf_text(full_run.run_dir / PDF_FILENAME)

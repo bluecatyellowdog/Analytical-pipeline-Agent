@@ -331,6 +331,7 @@ def real_pipeline(client, *, provider, review_client, review_provider, reviewing
             review_client=review_client,
             review_provider=review_provider,
             reviewing=reviewing,
+            planning=False,  # the benchmark scores cleaning; a plan would only add cost
             budget_usd=budget,
             out=out,
         )

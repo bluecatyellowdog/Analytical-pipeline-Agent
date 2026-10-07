@@ -155,6 +155,9 @@ class Run:
         self.review = _load(run_dir, "review_log.json")
         self.analyst_log = _load(run_dir, "analyst_log.json")
         self.coder_log = _load(run_dir, "coder_log.json")
+        self.analysis_plan = _load(run_dir, "analysis_plan_ai.json")
+        self.gate_3 = _load(run_dir, "gate_3.json")
+        self.planner_log = _load(run_dir, "planner_log.json")
 
     @property
     def file_name(self) -> str:
@@ -186,6 +189,7 @@ class Run:
             "analyst": total((self.analyst_log or {}).get("attempts")),
             "coder": total((self.coder_log or {}).get("attempts")),
             "reviewer": review,
+            "planner": total((self.planner_log or {}).get("attempts")),
         }
 
 
@@ -310,6 +314,14 @@ def _attention(run: Run) -> list[str]:
                 "The reviewer could not verify enough with numbers, so its verdict carries "
                 "little weight."
             )
+    if stages.get("planning") == "blocked":
+        items.append(
+            "No analysis plan passed Gate 3, so the analysis cannot start. planner_log.json "
+            "has every attempt and gate_3.json the last problems."
+        )
+    for check in (run.gate_3 or {}).get("checks", []):
+        if not check.get("passed") and check.get("severity") == "warn":
+            items.append(f"Gate 3 flagged {check['name']}: {check['message']}")
     return items
 
 
@@ -371,6 +383,22 @@ def _summary(run: Run) -> list:
                 P(f"{rounds} review round(s). " + _review_meaning(review_status), "cell"),
             ]
         )
+    if run.gate_3:
+        questions = (run.analysis_plan or {}).get("questions", [])
+        closed = sum(1 for q in questions if not q.get("feasible", True))
+        meaning = (
+            f"{len(questions)} question(s) planned, {closed} marked not possible. Approved "
+            f"automatically; change it in analysis_plan.yaml."
+            if run.analysis_plan
+            else "No plan passed; see 'Look at these first'."
+        )
+        result_rows.append(
+            [
+                P("4. Plan: Gate 3", "cell"),
+                M(outcome(run.gate_3.get("outcome", "n/a")), "cell"),
+                P(meaning, "cell"),
+            ]
+        )
 
     numbers: list[list[Any]] = []
     numbers.append(
@@ -411,7 +439,8 @@ def _summary(run: Run) -> list:
         [
             "LLM cost",
             f"${total:.2f} for this run (analyst ${costs['analyst']:.2f}, "
-            f"coder ${costs['coder']:.2f}, reviewer ${costs['reviewer']:.2f})",
+            f"coder ${costs['coder']:.2f}, reviewer ${costs['reviewer']:.2f}, "
+            f"planner ${costs['planner']:.2f})",
         ]
     )
 
@@ -438,6 +467,8 @@ def _summary(run: Run) -> list:
         "decisions.yaml: the decisions on judgment calls; change one and run the cleaning again",
         "cleaning_report.md and the *_log.json files: the full technical audit trail",
     ]
+    if run.analysis_plan:
+        files.append("analysis_plan.yaml: the analysis plan; edit it to change what is analysed")
     story += [P("Files in the run folder", "h2"), *bullets(files)]
     return story
 
@@ -590,7 +621,8 @@ def _received(run: Run) -> list:
 def _checks_table(gate: dict[str, Any]) -> Table:
     rows = [["Check", "Result", "Details"]]
     for check in gate.get("checks", []):
-        word = "pass" if check["passed"] else ("FLAG" if check["severity"] == "warn" else "BLOCK")
+        failed = {"warn": "FLAG", "info": "note"}.get(check["severity"], "BLOCK")
+        word = "pass" if check["passed"] else failed
         rows.append(
             [
                 check["name"],
@@ -830,6 +862,46 @@ def _review(run: Run) -> list:
     return story
 
 
+def _plan(run: Run) -> list:
+    plan = run.analysis_plan
+    if not plan and not run.gate_3:
+        return []
+    story = [
+        PageBreak(),
+        P("6. The analysis plan", "h1"),
+        P(
+            "Written by the AI from your brief and a summary of the clean data (never rows), "
+            "checked by Gate 3 and approved automatically. To change it, edit "
+            "analysis_plan.yaml: your version wins.",
+            "note",
+        ),
+    ]
+    if plan:
+        story.append(ai_text(plan.get("objective", "")))
+        if plan.get("interpretation"):
+            story += [P("How the brief was read:", "body"), ai_text(plan["interpretation"])]
+        rows = [["#", "Question", "Tools", "Status"]]
+        for q in sorted(plan.get("questions", []), key=lambda q: q.get("priority", 5)):
+            status = (
+                "planned"
+                if q.get("feasible", True)
+                else f"not possible: {q.get('infeasible_reason')}"
+            )
+            rows.append([q["id"], q["question"], ", ".join(q.get("methods", [])) or "-", status])
+        story += [P("Questions", "h2"), table(rows, [0.06, 0.5, 0.2, 0.24])]
+        excluded = plan.get("excluded_features", [])
+        if excluded:
+            story += [
+                P("Left out of the analysis", "h2"),
+                *bullets([f"{e['column']} ({e['source']}): {e['reason']}" for e in excluded]),
+            ]
+        if plan.get("limitations"):
+            story += [P("Limitations", "h2"), *bullets(plan["limitations"])]
+    if run.gate_3:
+        story += [P("Gate 3 checks", "h2"), _checks_table(run.gate_3)]
+    return story
+
+
 def _audit(run: Run) -> list:
     manifest = run.manifest
     costs = run.costs()
@@ -838,8 +910,9 @@ def _audit(run: Run) -> list:
         "analyst": len((run.analyst_log or {}).get("attempts", [])),
         "coder": len((run.coder_log or {}).get("attempts", [])),
         "reviewer": sum(len(r.get("attempts", [])) for r in (run.review or {}).get("rounds", [])),
+        "planner": len((run.planner_log or {}).get("attempts", [])),
     }
-    for agent in ("analyst", "coder", "reviewer"):
+    for agent in ("analyst", "coder", "reviewer", "planner"):
         model = manifest.get("models", {}).get(agent, {}).get("name", "-")
         version = manifest.get("prompt_versions", {}).get(agent, "-")
         rows.append([agent, model, version, str(calls[agent]), f"${costs[agent]:.4f}"])
@@ -862,7 +935,7 @@ def _audit(run: Run) -> list:
     files = sorted(p.name for p in run.dir.iterdir() if p.is_file())
     return [
         PageBreak(),
-        P("6. Audit", "h1"),
+        P("7. Audit", "h1"),
         table(facts, [0.25, 0.75], header=False),
         P("Models", "h2"),
         table(rows, [0.14, 0.36, 0.18, 0.12, 0.2]),
@@ -893,6 +966,7 @@ def build_pdf(run_dir: str | Path) -> Path:
         *_changed(run),
         *_checks(run),
         *_review(run),
+        *_plan(run),
         *_audit(run),
     ]
     footer = _safe(f"Data cleaning report - {run.file_name}")
