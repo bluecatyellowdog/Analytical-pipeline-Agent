@@ -18,6 +18,7 @@ from pypdf import PdfReader
 from pipeline.agents.llm import FakeLLM
 from pipeline.report_pdf import PDF_FILENAME, build_pdf
 from pipeline.run import run_all, summarise
+from tests.unit.test_analysis_agent import FIXTURE_ANALYSIS_REPLIES
 from tests.unit.test_coder import DIAGNOSIS, GOOD_STEPS, plan_json, step
 from tests.unit.test_planner import FIXTURE_PLAN_REPLY
 
@@ -70,7 +71,12 @@ def pdf_text(path) -> str:
 @pytest.fixture
 def full_run(workspace):
     llm = FakeLLM(
-        [DIAGNOSIS.model_dump_json(), plan_json([*GOOD_STEPS, CUSTOM]), FIXTURE_PLAN_REPLY]
+        [
+            DIAGNOSIS.model_dump_json(),
+            plan_json([*GOOD_STEPS, CUSTOM]),
+            FIXTURE_PLAN_REPLY,
+            *FIXTURE_ANALYSIS_REPLIES,
+        ]
     )
     summary = run_all("loans.csv", "brief.yaml", llm, review_client=FakeLLM([VERDICT]))
     return summary
@@ -86,6 +92,19 @@ class TestAFullRun:
         first_page = PdfReader(full_run.run_dir / PDF_FILENAME).pages[0].extract_text()
         for expected in ("Summary", "Gate 1", "Gate 2", "Review", "Gate 3", "12"):
             assert expected in first_page, expected
+
+    def test_the_findings_come_with_the_tool_results_behind_them(self, full_run) -> None:
+        text = pdf_text(full_run.run_dir / PDF_FILENAME)
+        for expected in (
+            "Data cleaning and analysis report",
+            "What the analysis found",
+            "Loan amounts vary widely. (moderate)",
+            "T1 summary_table: 12 rows.",
+            "not possible with this data",
+            "Gate 4 checks",
+            "numbers_traceable",
+        ):
+            assert expected in text, expected
 
     def test_the_analysis_plan_is_shown_with_how_to_change_it(self, full_run) -> None:
         text = pdf_text(full_run.run_dir / PDF_FILENAME)

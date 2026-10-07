@@ -33,6 +33,7 @@ from pipeline.agents.common import (
     brief_block,
     compact_validation_error,
     extract_json_object,
+    fenced,
     load_manifest,
     record_in_manifest,
     save_manifest,
@@ -41,7 +42,8 @@ from pipeline.agents.common import (
     write_attempt_log,
 )
 from pipeline.agents.llm import LLMClient, LLMConfigError, Message, connect
-from pipeline.checks.plan_gate import gate_3_plan, leak_suspects, problems_of
+from pipeline.checks.gates import problems_of
+from pipeline.checks.plan_gate import gate_3_plan, leak_suspects
 from pipeline.contracts.audit import GateResult
 from pipeline.contracts.common import utcnow
 from pipeline.contracts.context_brief import ContextBrief
@@ -111,11 +113,6 @@ def prompt_version() -> str:
     return short_hash(system_prompt())
 
 
-def _fenced(tag: str, text: str) -> str:
-    """Data in a block that no value inside can close: every '<' is escaped."""
-    return f"<{tag}>\n{text.replace('<', '&lt;')}\n</{tag}>"
-
-
 def build_messages(
     ctx: AnalysisContext,
     brief: ContextBrief,
@@ -136,9 +133,9 @@ def build_messages(
     noted = "\n".join(f"- {item}" for item in limitations[:MAX_LIMITATIONS]) or "None recorded."
     user = (
         f"Context brief:\n{brief_block(brief)}\n"
-        f"{_fenced('data', describe_data(ctx))}\n\n"
+        f"{fenced('data', describe_data(ctx))}\n\n"
         f"{leaks}\n\n"
-        f"Limitations recorded while cleaning:\n{_fenced('limitations', noted)}\n\n"
+        f"Limitations recorded while cleaning:\n{fenced('limitations', noted)}\n\n"
         "Return the plan as one JSON object."
     )
     return [{"role": "system", "content": system_prompt()}, {"role": "user", "content": user}]
@@ -227,6 +224,63 @@ def user_edited(run_dir: Path) -> bool:
     ai = AnalysisPlan.model_validate_json(original.read_text(encoding="utf-8"))
     mine = yaml.safe_load(edited.read_text(encoding="utf-8")) or {}
     return mine != ai.model_dump(mode="json", exclude=set(SET_BY_CODE))
+
+
+def plan_in_force(run_dir: Path) -> AnalysisPlan | None:
+    """The plan the analysis runs: your edit of analysis_plan.yaml when there is one, else
+    the AI's. An edited plan is approved by the user, with every change listed."""
+    ai_path, yaml_path = run_dir / PLAN_AI_JSON, run_dir / PLAN_YAML
+    ai = (
+        AnalysisPlan.model_validate_json(ai_path.read_text(encoding="utf-8"))
+        if ai_path.exists()
+        else None
+    )
+    if not user_edited(run_dir):
+        return ai
+    mine = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(mine, dict):
+        raise AnalysisInputError(f"{PLAN_YAML} must hold the plan's fields, as the AI wrote them")
+    try:
+        return AnalysisPlan.model_validate(
+            {k: v for k, v in mine.items() if k not in SET_BY_CODE}
+            | {
+                "run_id": ai.run_id if ai else load_manifest(run_dir).run_id,
+                "approved": True,
+                "approved_at": utcnow(),
+                "approved_by": "user",
+                "human_edits": describe_edits(ai, mine),
+            }
+        )
+    except ValidationError as error:
+        raise AnalysisInputError(
+            f"{PLAN_YAML} is not a valid plan: {compact_validation_error(error)}"
+        ) from error
+
+
+def describe_edits(ai: AnalysisPlan | None, mine: dict[str, Any]) -> list[str]:
+    """What the user changed, field by field and question by question."""
+    if ai is None:
+        return ["The whole plan was written by the user."]
+    original = ai.model_dump(mode="json", exclude=set(SET_BY_CODE))
+    edits = [
+        f"Changed {name}."
+        for name in original
+        if name != "questions" and mine.get(name, original[name]) != original[name]
+    ]
+    before = {q["id"]: q for q in original["questions"]}
+    after = {q.get("id"): q for q in mine.get("questions", []) if isinstance(q, dict)}
+    for qid, question in after.items():
+        if qid not in before:
+            edits.append(f"Added question {qid}: {question.get('question', '')}")
+        elif question != before[qid]:
+            fields = sorted(
+                k for k in set(question) | set(before[qid]) if question.get(k) != before[qid].get(k)
+            )
+            edits.append(f"Changed question {qid} ({', '.join(fields)}).")
+    edits += [
+        f"Removed question {qid}: {q['question']}" for qid, q in before.items() if qid not in after
+    ]
+    return edits or ["Saved the file without changing the plan."]
 
 
 def _limitations(flags: list[Any]) -> list[str]:

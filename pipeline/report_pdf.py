@@ -27,7 +27,9 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
+    Image,
     KeepTogether,
     PageBreak,
     Paragraph,
@@ -155,9 +157,16 @@ class Run:
         self.review = _load(run_dir, "review_log.json")
         self.analyst_log = _load(run_dir, "analyst_log.json")
         self.coder_log = _load(run_dir, "coder_log.json")
-        self.analysis_plan = _load(run_dir, "analysis_plan_ai.json")
+        self.analysis = _load(run_dir, "analysis.json")
+        self.analysis_plan = (self.analysis or {}).get("plan") or _load(
+            run_dir, "analysis_plan_ai.json"
+        )
         self.gate_3 = _load(run_dir, "gate_3.json")
         self.planner_log = _load(run_dir, "planner_log.json")
+        self.gate_4 = _load(run_dir, "gate_4.json")
+        self.analysis_log = _load(run_dir, "analysis_log.json")
+        catalog = _load(run_dir, "artifacts.json") or {}
+        self.artifacts = {a["artifact_id"]: a for a in catalog.get("artifacts", [])}
 
     @property
     def file_name(self) -> str:
@@ -190,7 +199,12 @@ class Run:
             "coder": total((self.coder_log or {}).get("attempts")),
             "reviewer": review,
             "planner": total((self.planner_log or {}).get("attempts")),
+            "analysis": total((self.analysis_log or {}).get("attempts")),
         }
+
+    @property
+    def title(self) -> str:
+        return "Data cleaning and analysis report" if self.analysis else "Data cleaning report"
 
 
 # -- text helpers -----------------------------------------------------------
@@ -322,6 +336,16 @@ def _attention(run: Run) -> list[str]:
     for check in (run.gate_3 or {}).get("checks", []):
         if not check.get("passed") and check.get("severity") == "warn":
             items.append(f"Gate 3 flagged {check['name']}: {check['message']}")
+    if stages.get("analysis") == "blocked":
+        items.append(
+            "No write-up passed Gate 4, so there are no findings. analysis_log.json has every "
+            "tool call and attempt, and gate_4.json the last problems."
+        )
+    for check in (run.gate_4 or {}).get("checks", []):
+        if not check.get("passed") and check.get("severity") == "warn":
+            items += [
+                f"Gate 4: {problem}" for problem in check.get("observed", {}).get("problems", [])
+            ]
     return items
 
 
@@ -386,9 +410,13 @@ def _summary(run: Run) -> list:
     if run.gate_3:
         questions = (run.analysis_plan or {}).get("questions", [])
         closed = sum(1 for q in questions if not q.get("feasible", True))
+        approval = (
+            "Edited by you."
+            if (run.analysis_plan or {}).get("approved_by") == "user"
+            else "Approved automatically; change it in analysis_plan.yaml."
+        )
         meaning = (
-            f"{len(questions)} question(s) planned, {closed} marked not possible. Approved "
-            f"automatically; change it in analysis_plan.yaml."
+            f"{len(questions)} question(s) planned, {closed} marked not possible. {approval}"
             if run.analysis_plan
             else "No plan passed; see 'Look at these first'."
         )
@@ -396,6 +424,23 @@ def _summary(run: Run) -> list:
             [
                 P("4. Plan: Gate 3", "cell"),
                 M(outcome(run.gate_3.get("outcome", "n/a")), "cell"),
+                P(meaning, "cell"),
+            ]
+        )
+    if run.gate_4:
+        up = (run.analysis or {}).get("write_up", {})
+        answered = sum(a["status"] in ("answered", "partly") for a in up.get("answers", []))
+        meaning = (
+            f"{len(up.get('findings', []))} finding(s); {answered} of "
+            f"{len(up.get('answers', []))} question(s) answered. Every number in the "
+            f"write-up was checked against the tool results."
+            if run.analysis
+            else "No write-up passed; see 'Look at these first'."
+        )
+        result_rows.append(
+            [
+                P("5. Analyse: Gate 4", "cell"),
+                M(outcome(run.gate_4.get("outcome", "n/a")), "cell"),
                 P(meaning, "cell"),
             ]
         )
@@ -440,12 +485,12 @@ def _summary(run: Run) -> list:
             "LLM cost",
             f"${total:.2f} for this run (analyst ${costs['analyst']:.2f}, "
             f"coder ${costs['coder']:.2f}, reviewer ${costs['reviewer']:.2f}, "
-            f"planner ${costs['planner']:.2f})",
+            f"planner ${costs['planner']:.2f}, analysis ${costs['analysis']:.2f})",
         ]
     )
 
     story = [
-        P("Data cleaning report", "title"),
+        P(run.title, "title"),
         P(
             f"{run.file_name}  -  run {run.manifest.get('run_id', '')}  -  "
             f"{datetime.now():%Y-%m-%d %H:%M}",
@@ -456,8 +501,14 @@ def _summary(run: Run) -> list:
         table(result_rows, [0.2, 0.12, 0.68]),
         Spacer(1, 6),
         table(numbers, [0.2, 0.8], header=False),
-        P("Look at these first", "h2"),
     ]
+    if run.analysis:
+        up = run.analysis["write_up"]
+        story += [
+            P("What the analysis found (in full in the next section)", "h2"),
+            *bullets([f"{f['headline']} ({f['strength']})" for f in up["findings"]]),
+        ]
+    story.append(P("Look at these first", "h2"))
     attention = _attention(run)
     story += bullets(attention) if attention else [P("Nothing needs your attention.")]
     files = []
@@ -469,6 +520,10 @@ def _summary(run: Run) -> list:
     ]
     if run.analysis_plan:
         files.append("analysis_plan.yaml: the analysis plan; edit it to change what is analysed")
+    if run.analysis:
+        files.append(
+            "analysis_report.md and artifacts.json: the findings and every tool result behind them"
+        )
     story += [P("Files in the run folder", "h2"), *bullets(files)]
     return story
 
@@ -862,20 +917,114 @@ def _review(run: Run) -> list:
     return story
 
 
+STATUS_WORDS = {
+    "answered": "answered",
+    "partly": "partly answered",
+    "not_answered": "not answered",
+    "infeasible": "not possible with this data",
+}
+CHART_WIDTH = 150 * mm
+
+
+def _chart(run: Run, artifact: dict[str, Any]) -> Image | None:
+    path = run.dir / artifact.get("spec", {}).get("chart_file", "")
+    if not artifact.get("spec", {}).get("chart_file") or not path.exists():
+        return None
+    width, height = ImageReader(str(path)).getSize()
+    return Image(str(path), width=CHART_WIDTH, height=CHART_WIDTH * height / width)
+
+
+def _finding(run: Run, finding: dict[str, Any], calls: dict, shown: set[str]) -> list:
+    """One finding: the AI's words, then the tool results and charts it rests on."""
+    story = [
+        M(f"<b>{E(finding['headline'])}</b> ({E(finding['strength'])})"),
+        ai_text(finding["detail"]),
+    ]
+    story += bullets([f"Caveat: {caveat}" for caveat in finding.get("caveats", [])])
+    for call_id in finding["evidence"]:
+        call = calls.get(call_id)
+        if call is None:
+            continue
+        story.append(P(f"{call_id} {call['tool']}: {call['summary']}", "note"))
+        if call_id in shown:
+            continue
+        shown.add(call_id)
+        for artifact_id in call.get("artifact_ids", []):
+            image = _chart(run, run.artifacts.get(artifact_id, {}))
+            if image is not None:
+                story.append(image)
+    return story
+
+
+def _findings(run: Run) -> list:
+    """What the analysis found, question by question, with its evidence beside it."""
+    if not run.analysis:
+        return []
+    up, plan = run.analysis["write_up"], run.analysis["plan"]
+    calls = {c["call_id"]: c for c in run.analysis["calls"]}
+    findings = {f["id"]: f for f in up["findings"]}
+    story = [
+        PageBreak(),
+        P("What the analysis found", "h1"),
+        P(
+            "Written by the AI from the tool results, which are shown under each finding (the "
+            "lines starting T1, T2, ...). Gate 4 checked that every number in the AI's text is "
+            "one a tool reported.",
+            "note",
+        ),
+        ai_text(up["summary"]),
+    ]
+    answers = {a["question_id"]: a for a in up["answers"]}
+    shown: set[str] = set()
+    used: set[str] = set()
+    for question in sorted(plan["questions"], key=lambda q: q.get("priority", 5)):
+        answer = answers.get(question["id"])
+        if answer is None:
+            continue
+        story += [
+            P(f"{question['id']}. {question['question']}", "h2"),
+            M(f"<b>{E(STATUS_WORDS[answer['status']])}.</b> {E(answer['answer'])}"),
+        ]
+        if answer.get("reason"):
+            story.append(P(f"Why: {answer['reason']}", "note"))
+        for finding_id in answer.get("finding_ids", []):
+            used.add(finding_id)
+            story += _finding(run, findings[finding_id], calls, shown)
+    extra = [f for f in up["findings"] if f["id"] not in used]
+    if extra:
+        story.append(P("Also worth knowing", "h2"))
+        for finding in extra:
+            story += _finding(run, finding, calls, shown)
+    if up.get("limitations"):
+        story += [P("Limitations", "h2"), *bullets(up["limitations"])]
+    if up.get("next_questions"):
+        story += [P("Worth looking at next", "h2"), *bullets(up["next_questions"])]
+    if run.gate_4:
+        story += [P("Gate 4 checks", "h2"), _checks_table(run.gate_4)]
+    return story
+
+
 def _plan(run: Run) -> list:
     plan = run.analysis_plan
     if not plan and not run.gate_3:
         return []
+    edited = (plan or {}).get("approved_by") == "user"
     story = [
         PageBreak(),
         P("6. The analysis plan", "h1"),
         P(
             "Written by the AI from your brief and a summary of the clean data (never rows), "
-            "checked by Gate 3 and approved automatically. To change it, edit "
-            "analysis_plan.yaml: your version wins.",
+            + (
+                "then edited by you and checked by Gate 3."
+                if edited
+                else "checked by Gate 3 and approved automatically. To change it, edit "
+                "analysis_plan.yaml: your version wins."
+            ),
             "note",
         ),
     ]
+    if edited:
+        story += [P("What you changed:", "body"), *bullets(plan.get("human_edits", []))]
     if plan:
         story.append(ai_text(plan.get("objective", "")))
         if plan.get("interpretation"):
@@ -911,8 +1060,9 @@ def _audit(run: Run) -> list:
         "coder": len((run.coder_log or {}).get("attempts", [])),
         "reviewer": sum(len(r.get("attempts", [])) for r in (run.review or {}).get("rounds", [])),
         "planner": len((run.planner_log or {}).get("attempts", [])),
+        "analysis": len((run.analysis_log or {}).get("attempts", [])),
     }
-    for agent in ("analyst", "coder", "reviewer", "planner"):
+    for agent in ("analyst", "coder", "reviewer", "planner", "analysis"):
         model = manifest.get("models", {}).get(agent, {}).get("name", "-")
         version = manifest.get("prompt_versions", {}).get(agent, "-")
         rows.append([agent, model, version, str(calls[agent]), f"${costs[agent]:.4f}"])
@@ -961,6 +1111,7 @@ def build_pdf(run_dir: str | Path) -> Path:
     target = run_dir / PDF_FILENAME
     story = [
         *_summary(run),
+        *_findings(run),
         *_received(run),
         *_wrong(run),
         *_changed(run),
@@ -969,7 +1120,7 @@ def build_pdf(run_dir: str | Path) -> Path:
         *_plan(run),
         *_audit(run),
     ]
-    footer = _safe(f"Data cleaning report - {run.file_name}")
+    footer = _safe(f"{run.title} - {run.file_name}")
 
     def on_page(canvas, document) -> None:
         canvas.saveState()
@@ -986,7 +1137,7 @@ def build_pdf(run_dir: str | Path) -> Path:
         rightMargin=18 * mm,
         topMargin=16 * mm,
         bottomMargin=18 * mm,
-        title=f"Data cleaning report: {run.file_name}",
+        title=f"{run.title}: {run.file_name}",
         author="Auditable data science pipeline",
     )
     document.build(story, onFirstPage=on_page, onLaterPages=on_page)

@@ -14,9 +14,10 @@ import shutil
 import pytest
 
 from pipeline import clean
-from pipeline.agents import planner
+from pipeline.agents import analysis, planner
 from pipeline.agents.llm import FakeLLM
 from pipeline.run import run_all, summarise
+from tests.unit.test_analysis_agent import FIXTURE_ANALYSIS_REPLIES
 from tests.unit.test_coder import DIAGNOSIS, plan_json
 from tests.unit.test_planner import FIXTURE_PLAN_REPLY
 
@@ -53,7 +54,9 @@ def workspace(fixtures_dir, tmp_path, monkeypatch):
 
 
 def test_one_command_runs_all_three_steps(workspace) -> None:
-    llm = FakeLLM([DIAGNOSIS.model_dump_json(), plan_json(), FIXTURE_PLAN_REPLY])
+    llm = FakeLLM(
+        [DIAGNOSIS.model_dump_json(), plan_json(), FIXTURE_PLAN_REPLY, *FIXTURE_ANALYSIS_REPLIES]
+    )
     summary = run_all("loans.csv", "brief.yaml", llm, review_client=FakeLLM([VERDICT]))
 
     assert summary.stopped_at is None
@@ -67,6 +70,9 @@ def test_one_command_runs_all_three_steps(workspace) -> None:
         clean.HANDOFF_FILE,
         planner.PLAN_YAML,
         planner.GATE_3_FILE,
+        analysis.ANALYSIS_REPORT,
+        analysis.ARTIFACTS_JSON,
+        analysis.GATE_4_FILE,
     ):
         assert (folder / name).exists(), name
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
@@ -76,12 +82,15 @@ def test_one_command_runs_all_three_steps(workspace) -> None:
         "cleaning": "done",
         "review": "accepted",
         "planning": "done",
+        "analysis": "done",
     }
     assert summary.planning.plan.approved_by == "auto"
 
 
 def test_the_index_links_the_cleaning_report(workspace) -> None:
-    llm = FakeLLM([DIAGNOSIS.model_dump_json(), plan_json(), FIXTURE_PLAN_REPLY])
+    llm = FakeLLM(
+        [DIAGNOSIS.model_dump_json(), plan_json(), FIXTURE_PLAN_REPLY, *FIXTURE_ANALYSIS_REPLIES]
+    )
     summary = run_all("loans.csv", "brief.yaml", llm, review_client=FakeLLM([VERDICT]))
     index = (workspace / "runs" / "index.md").read_text(encoding="utf-8")
     assert f"{summary.run_dir.name}/{clean.CLEANING_REPORT}" in index
@@ -98,7 +107,9 @@ def test_a_gate_1_block_stops_before_any_llm_call(workspace) -> None:
 
 
 def test_the_summary_says_where_to_look(workspace) -> None:
-    llm = FakeLLM([DIAGNOSIS.model_dump_json(), plan_json(), FIXTURE_PLAN_REPLY])
+    llm = FakeLLM(
+        [DIAGNOSIS.model_dump_json(), plan_json(), FIXTURE_PLAN_REPLY, *FIXTURE_ANALYSIS_REPLIES]
+    )
     summary = run_all("loans.csv", "brief.yaml", llm, review_client=FakeLLM([VERDICT]))
     text = summarise(summary)
 
@@ -108,8 +119,11 @@ def test_the_summary_says_where_to_look(workspace) -> None:
         "Review: ACCEPTED",
         "4. Plan",
         "Gate 3: PASS",
+        "5. Analyse",
+        "Gate 4: PASS",
         "Clean data:",
         "Plan:",
+        "Findings:",
     ):
         assert expected in text, expected
     assert str((summary.run_dir / clean.CLEANING_REPORT).resolve()) in text

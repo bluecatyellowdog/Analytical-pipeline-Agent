@@ -77,10 +77,16 @@ def profile_block(profile_llm: dict[str, Any]) -> str:
     return f"<profile>\n{text}\n</profile>"
 
 
+def fenced(tag: str, text: str) -> str:
+    """Data in a block that no value inside can close: every '<' is escaped."""
+    escaped = text.replace("<", "&lt;")
+    return f"<{tag}>\n{escaped}\n</{tag}>"
+
+
 def extract_json_object(text: str) -> str:
     """The JSON object in a reply, with or without a code fence."""
-    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
-    candidate = fenced.group(1) if fenced else text
+    block = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
+    candidate = block.group(1) if block else text
     start, end = candidate.find("{"), candidate.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("the reply contains no JSON object")
