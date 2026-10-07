@@ -153,6 +153,7 @@ class AnalysisContext:
 
 
 YES_NO = {1: 1, 0: 0, "1": 1, "0": 0, "true": 1, "false": 0}  # True == 1, False == 0
+YES_NO |= {"yes": 1, "no": 0, "ja": 1, "nej": 0}
 
 
 def as_yes_no(values: pd.Series) -> pd.Series | None:

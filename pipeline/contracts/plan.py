@@ -98,7 +98,8 @@ class PlanQuestion(Strict):
 
 
 class AnalysisPlan(Strict):
-    """Stage 3's second half, approved by a human in Stage 4."""
+    """Stage 3's second half. Approved automatically once Gate 3 passes (D034); the user
+    changes it by editing analysis_plan.yaml, and an edited plan is approved by the user."""
 
     run_id: str
     objective: str = Field(description="The user's goal, restated by the planner.")
@@ -122,6 +123,10 @@ class AnalysisPlan(Strict):
     created_at: datetime = Field(default_factory=utcnow)
     approved: bool = False
     approved_at: datetime | None = None
+    approved_by: Literal["auto", "user"] | None = Field(
+        default=None,
+        description="'auto': passed Gate 3 and ran straight through; 'user': the user's edit.",
+    )
     human_edits: list[str] = Field(
         default_factory=list, description="What the human changed at approval, for the audit trail."
     )
@@ -139,6 +144,8 @@ class AnalysisPlan(Strict):
             raise ValueError(f"task_type {self.task_type!r} requires a target column")
         if self.target and self.target in {e.column for e in self.excluded_features}:
             raise ValueError(f"target {self.target!r} cannot also be an excluded feature")
+        if self.approved and not (self.approved_at and self.approved_by):
+            raise ValueError("an approved plan records when and by whom ('auto' or 'user')")
         return self
 
     @property

@@ -41,6 +41,7 @@ from pipeline.contracts import (
     TypeProposal,
     ValueCount,
 )
+from pipeline.contracts.common import utcnow
 
 RUN_ID = "run_000000000001"
 
@@ -342,6 +343,8 @@ def analysis_plan(approved: bool = False) -> AnalysisPlan:
         success_criteria="Each question answered or explicitly marked infeasible with a reason.",
         limitations=["8.4% of amounts are missing and were not imputed."],
         approved=approved,
+        approved_at=utcnow() if approved else None,
+        approved_by="user" if approved else None,
         human_edits=["Dropped a fourth question about postnummer: excluded by the brief."]
         if approved
         else [],

@@ -185,7 +185,7 @@ def _left_out_text(design: _Design) -> str:
     return f"rows left out ({reasons})"
 
 
-def _auc(y: pd.Series, score) -> float:
+def auc(y: pd.Series, score) -> float:
     """The chance that a random row with outcome 1 scores above one with outcome 0."""
     ranks = pd.Series(np.asarray(score, dtype=float)).rank().to_numpy()
     positive = np.asarray(y) == 1
@@ -320,8 +320,8 @@ def _separating(design: _Design, y: pd.Series) -> list[str]:
             if y.groupby(key).transform("mean").isin([0.0, 1.0]).all():
                 culprits.append(column)
         else:
-            auc = _auc(y, design.x[names[0]])
-            if max(auc, 1 - auc) > 0.999:
+            separation = auc(y, design.x[names[0]])
+            if max(separation, 1 - separation) > 0.999:
                 culprits.append(column)
     return culprits
 
@@ -370,7 +370,7 @@ def logistic_regression(ctx: AnalysisContext, params: LogisticParams) -> list[To
         "effects": len(design.terms),
         "pseudo_r_squared": _finite(fit.prsquared),
         "lr_test_p": _finite(fit.llr_pvalue),
-        "auc": _auc(y, fit.predict(design.x)),
+        "auc": auc(y, fit.predict(design.x)),
         "converged": converged,
         "notes": design.notes,
     }
