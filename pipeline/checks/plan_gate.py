@@ -22,9 +22,9 @@ from dataclasses import replace
 
 import pandas as pd
 
-from pipeline.checks.gates import build_gate
-from pipeline.contracts.audit import CheckResult, GateResult
-from pipeline.contracts.common import CheckLayer, Severity
+from pipeline.checks.gates import build_gate, checked
+from pipeline.contracts.audit import GateResult
+from pipeline.contracts.common import Severity
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.plan import AnalysisPlan, PlanQuestion
 from pipeline.tools import REGISTRY
@@ -64,73 +64,73 @@ def gate_3_plan(
     feasible = [q for q in plan.questions if q.feasible]
 
     checks = [
-        _check(
+        checked(
             "columns_exist",
             "invariant",
             "block",
             _unknown_columns(plan, ctx),
             "Every column exists.",
         ),
-        _check(
+        checked(
             "methods_exist", "invariant", "block", _unknown_methods(plan), "Every method is a tool."
         ),
-        _check(
+        checked(
             "target_as_briefed",
             "invariant",
             "block",
             _target_problems(plan, ctx, brief),
             "The target is the brief's and can be analysed.",
         ),
-        _check(
+        checked(
             "task_type_fits_target",
             "invariant",
             "block",
             _task_type_problems(plan, planned),
             "The task type fits the target.",
         ),
-        _check(
+        checked(
             "usable_columns",
             "invariant",
             "block",
             _unusable_columns(feasible, plan, ctx, brief),
             "No identifier, personal, free-text or excluded column is analysed.",
         ),
-        _check(
+        checked(
             "exclusions_listed",
             "invariant",
             "block",
             _unlisted_exclusions(plan, ctx, brief),
             "Every excluded column is listed with its reason.",
         ),
-        _check(
+        checked(
             "methods_fit_target",
             "invariant",
             "block",
-            _method_target_problems(feasible, plan, target_kind),
+            _method_target_problems(feasible, plan, planned, target_kind),
             "Every method can run on this target.",
         ),
-        _check(
+        checked(
             "leaky_columns_excluded",
             "judgment",
             judged,
             _leaks_not_excluded(plan, planned),
             "No column that gives the answer away is used.",
         ),
-        _check(
+        checked(
             "feasible",
             "judgment",
             judged,
             [p for q in feasible for p in _infeasible(q, planned, target_kind)],
             "Every question has enough rows, or is marked infeasible.",
         ),
-        _check(
+        checked(
             "methods_fit_question",
             "judgment",
             "info",
             _method_kind_mismatches(feasible),
             "Every method suits its question.",
         ),
-        _check(
+        checked(
             "something_to_do",
             "judgment",
             "warn",
@@ -139,11 +139,6 @@ def gate_3_plan(
         ),
     ]
     return build_gate("gate_3_plan", checks)
-
-
-def problems_of(gate: GateResult) -> list[str]:
-    """Every failure as one line, for the planner or the user to act on."""
-    return [p for check in gate.failures for p in check.observed.get("problems", [check.message])]
 
 
 def leak_suspects(ctx: AnalysisContext) -> dict[str, float]:
@@ -168,19 +163,6 @@ def leak_suspects(ctx: AnalysisContext) -> dict[str, float]:
 
 
 # -- the checks ---------------------------------------------------------------
-
-
-def _check(
-    name: str, layer: CheckLayer, severity: Severity, problems: list[str], ok: str
-) -> CheckResult:
-    return CheckResult(
-        name=name,
-        layer=layer,
-        passed=not problems,
-        severity=severity,
-        message="; ".join(problems) if problems else ok,
-        observed={"problems": problems} if problems else {},
-    )
 
 
 def _target_kind(ctx: AnalysisContext) -> str | None:
@@ -277,13 +259,16 @@ def _unlisted_exclusions(
 
 
 def _method_target_problems(
-    questions: list[PlanQuestion], plan: AnalysisPlan, target_kind: str | None
+    questions: list[PlanQuestion],
+    plan: AnalysisPlan,
+    planned: AnalysisContext,
+    target_kind: str | None,
 ) -> list[str]:
     problems = []
     for q in questions:
         for method in q.methods:
             needs = TARGET_METHODS.get(method)
-            if needs is None:
+            if needs is None or (method == "linear_regression" and _side_outcomes(q, planned)):
                 continue
             if target_kind is None:
                 problems.append(f"{q.id}: {method} needs a yes/no or numeric target")
@@ -294,10 +279,18 @@ def _method_target_problems(
                 )
             elif needs == "numeric" and target_kind != "numeric":
                 problems.append(
-                    f"{q.id}: {method} needs a numeric target; {plan.target} is yes/no "
+                    f"{q.id}: {method} needs a numeric outcome: the target, or for a side "
+                    f"question another number column in the question; {plan.target} is yes/no "
                     f"(use logistic_regression)"
                 )
     return problems
+
+
+def _side_outcomes(q: PlanQuestion, ctx: AnalysisContext) -> list[str]:
+    """Number columns a side question could explain, when the target is not a number."""
+    if _target_kind(ctx) == "numeric":
+        return []
+    return [c for c in q.columns if c != ctx.target and ctx.kinds.get(c) == "numeric"]
 
 
 def _leaks_not_excluded(plan: AnalysisPlan, planned: AnalysisContext) -> list[str]:
@@ -342,6 +335,13 @@ def _infeasible(q: PlanQuestion, ctx: AnalysisContext, target_kind: str | None) 
                 problems.append(
                     f"{q.id}: {method} with {k} feature(s) needs {ROWS_PER_EFFECT * k} {what}; "
                     f"there are {rows}: {advice}"
+                )
+        elif method == "linear_regression" and _side_outcomes(q, ctx):
+            k = max(1, len(features) - 1)
+            if len(ctx.frame) < ROWS_PER_EFFECT * k:
+                problems.append(
+                    f"{q.id}: linear_regression with {k} feature(s) needs "
+                    f"{ROWS_PER_EFFECT * k} rows; there are {len(ctx.frame)}: {advice}"
                 )
         elif method == "target_by_group" and target_kind is not None:
             present = ctx.frame[ctx.target].notna()

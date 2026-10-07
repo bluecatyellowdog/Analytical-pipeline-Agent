@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.checks.plan_gate import gate_3_plan, leak_suspects, problems_of, task_type_of
+from pipeline.checks.gates import problems_of
+from pipeline.checks.plan_gate import gate_3_plan, leak_suspects, task_type_of
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.plan import AnalysisPlan
 from tests.unit.test_analysis_tools import loans_context
@@ -123,11 +124,19 @@ class TestInvariants:
     def test_methods_fit_the_target(self, ctx) -> None:
         questions = [
             *GOOD_QUESTIONS[:2],
-            question("q3", "drivers", ["alder", "misligholdt"], ["linear_regression"]),
+            question("q3", "drivers", ["region", "misligholdt"], ["linear_regression"]),
         ]
         gate = gate_3_plan(plan(questions=questions), ctx, BRIEF)
         assert "methods_fit_target" in failed(gate)
         assert "linear_regression" in " ".join(problems_of(gate))
+
+    def test_linear_regression_may_explain_another_number_in_a_side_question(self, ctx) -> None:
+        questions = [
+            *GOOD_QUESTIONS[:2],
+            question("q3", "relationship", ["beloeb", "indkomst"], ["linear_regression"]),
+        ]
+        gate = gate_3_plan(plan(questions=questions), ctx, BRIEF)
+        assert gate.outcome == "pass", problems_of(gate)
 
 
 class TestLeakage:

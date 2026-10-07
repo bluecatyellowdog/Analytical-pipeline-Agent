@@ -88,10 +88,24 @@ def _groups(
         labels.loc[present.index] = present.map(fmt)
     else:
         binned = pd.qcut(present, q=bins, duplicates="drop")
-        names = {iv: f"{fmt(iv.left)}-{fmt(iv.right)}" for iv in binned.cat.categories}
+        whole = bool((present == present.round()).all())
+        names = {
+            iv: _range_label(iv, first=i == 0, lowest=float(present.min()), whole=whole)
+            for i, iv in enumerate(binned.cat.categories)
+        }
         ordered = list(names.values())
         labels.loc[present.index] = binned.map(names).astype(object)
     return labels, [*ordered, MISSING]
+
+
+def _range_label(interval: pd.Interval, *, first: bool, lowest: float, whole: bool) -> str:
+    """A range as people read it: from the real lowest value, and '2-6' rather than '(1, 6]'
+    for whole numbers."""
+    low, high = (lowest if first else interval.left), interval.right
+    if whole:
+        low = lowest if first else math.floor(interval.left) + 1
+        high = math.floor(high)
+    return fmt(low) if low == high else f"{fmt(low)}-{fmt(high)}"
 
 
 def _collapse(table: pd.DataFrame, min_n: int, *, keep_order: bool) -> tuple[pd.DataFrame, int]:
@@ -276,10 +290,17 @@ def distribution(ctx: AnalysisContext, params: DistributionParams) -> list[ToolR
             {"from": float(a), "to": float(b), "count": int(c)}
             for a, b, c in zip(edges[:-1], edges[1:], counts, strict=True)
         ]
+        small = f"<{ctx.min_group_n}"  # a tail of a few rows is shown, not counted
+        shown = [
+            f"{fmt(b['from'])}-{fmt(b['to'])}: "
+            + (str(b["count"]) if b["count"] == 0 or b["count"] >= ctx.min_group_n else small)
+            for b in bins
+        ]
         text = (
             f"{column}: n={summary['n']}, missing={missing}, median {fmt(summary['median'])}, "
             f"middle half {fmt(summary['p25'])}-{fmt(summary['p75'])}, "
-            f"range {fmt(summary['min'])}-{fmt(summary['max'])}"
+            f"range {fmt(summary['min'])}-{fmt(summary['max'])}; rows per range: "
+            + "; ".join(shown)
         )
         figure = charts.histogram(edges, counts, title=f"Distribution of {column}", xlabel=column)
         return [
@@ -326,12 +347,24 @@ def distribution(ctx: AnalysisContext, params: DistributionParams) -> list[ToolR
 
 class GroupParams(Params):
     column: str
-    bins: int = Field(default=5, ge=2, le=10, description="Ranges a number is split into.")
+    bins: int = Field(
+        default=5,
+        ge=2,
+        le=10,
+        description="Ranges a number is split into. A number with this many distinct values "
+        "or fewer (a count such as 0-6) is grouped value by value instead.",
+    )
+    outcome: str | None = Field(
+        default=None,
+        description="A numeric or yes/no column to compare across the groups instead of the "
+        "target, for a side question.",
+    )
 
 
 @register("target_by_group", GroupParams, ("relationship", "segment"))
 def target_by_group(ctx: AnalysisContext, params: GroupParams) -> list[ToolResult]:
     """The target's rate (yes/no) or mean (number) per group of one column, with 95% intervals."""
+    ctx = ctx.with_outcome(params.outcome)
     column = params.column
     kind = ctx.feature(column)
     target, measure = _target(ctx)
@@ -368,7 +401,11 @@ def target_by_group(ctx: AnalysisContext, params: GroupParams) -> list[ToolResul
     text = (
         f"{measure.title()} of {ctx.target} by {column} (overall {_show(overall, measure)}, "
         f"n={int(present.sum())}): "
-        + "; ".join(f"{r['group']}: {_show(r[measure], measure)} (n={r['n']})" for r in rows)
+        + "; ".join(
+            f"{r['group']}: {_show(r[measure], measure)} (95% interval "
+            f"{_show(r['ci_low'], measure)} to {_show(r['ci_high'], measure)}, n={r['n']})"
+            for r in rows
+        )
     )
     if hidden:
         text += f"; {hidden} row(s) in groups too small to show"

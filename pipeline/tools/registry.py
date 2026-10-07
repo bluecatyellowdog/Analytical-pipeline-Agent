@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -119,6 +119,21 @@ class AnalysisContext:
         if not usable:
             raise ToolError("no usable feature columns")
         return usable
+
+    def with_outcome(self, outcome: str | None) -> AnalysisContext:
+        """This context with another column as the thing to explain, for a side question.
+
+        Results still go to this run's catalog and call log. The analysis target
+        itself may then be used like any other column.
+        """
+        if outcome is None or outcome == self.target:
+            return self
+        kind = self.require(outcome)
+        if outcome in self.excluded:
+            raise ToolError(f"{outcome} is excluded from the analysis and cannot be used")
+        if kind not in FEATURE_KINDS:
+            raise ToolError(f"{outcome} is a {kind} column and cannot be an outcome")
+        return replace(self, target=outcome)
 
     def target_type(self) -> str:
         """'binary' for a yes/no target, 'numeric' for a number; refused otherwise."""

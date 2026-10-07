@@ -10,6 +10,8 @@ that the tools find what is really there, and find nothing where nothing is.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -59,6 +61,11 @@ def rate_ctx(tmp_path):
     ctx.task_type = "regression"
     ctx.excluded = {"misligholdt"}
     return ctx
+
+
+def rate_ctx_like(ctx: AnalysisContext) -> AnalysisContext:
+    """The loans with a numeric target, so the yes/no column can be offered as an outcome."""
+    return replace(ctx, target="beloeb")
 
 
 def only(call):
@@ -163,6 +170,27 @@ class TestDescriptive:
         assert len(rates) == 4
         assert rates[-1] > rates[0], "default should rise with the loan amount"
 
+    def test_ranges_read_the_way_people_write_them(self, ctx) -> None:
+        ctx.frame["boern"] = np.random.default_rng(5).poisson(0.6, len(ctx.frame))
+        ctx.kinds["boern"] = "numeric"
+        data = only(
+            run_tool(ctx, "target_by_group", {"column": "boern", "bins": 3}, question_id="q1")
+        ).data
+        labels = [g["group"] for g in data["groups"]]
+        assert labels == ["0-1", "2-4"], "not '-0.001-1' and '1-4'"
+        ages = only(run_tool(ctx, "target_by_group", {"column": "alder"}, question_id="q1"))
+        assert ages.data["groups"][0]["group"].startswith("18-"), "the real lowest age"
+
+    def test_group_results_carry_their_intervals_for_the_agent(self, ctx) -> None:
+        call = run_tool(ctx, "target_by_group", {"column": "region"}, question_id="q1")
+        assert "(95% interval " in call.summary and " to " in call.summary
+
+    def test_a_histogram_tells_the_agent_the_rows_per_range_but_hides_tiny_tails(self, ctx) -> None:
+        ctx.frame.loc[:2, "indkomst"] = 9_000_000.0
+        call = run_tool(ctx, "distribution", {"column": "indkomst"}, question_id="q1")
+        assert "rows per range:" in call.summary and ": <10" in call.summary
+        assert ": 3;" not in call.summary and not call.summary.endswith(": 3")
+
     def test_small_groups_are_never_shown_on_their_own(self, ctx) -> None:
         ctx.frame.loc[:3, "region"] = "Bornholm"
         artifact = only(run_tool(ctx, "target_by_group", {"column": "region"}, question_id="q1"))
@@ -188,6 +216,19 @@ class TestDescriptive:
         assert groups[rate_ctx.effect_region]["mean"] > max(others)
         for g in groups.values():
             assert g["ci_low"] < g["mean"] < g["ci_high"]
+
+    def test_target_by_group_can_compare_another_column(self, ctx) -> None:
+        data = only(
+            run_tool(
+                ctx,
+                "target_by_group",
+                {"column": "misligholdt", "outcome": "beloeb"},
+                question_id="q1",
+            )
+        ).data
+        assert data["measure"] == "mean" and data["target"] == "beloeb"
+        groups = {g["group"]: g["mean"] for g in data["groups"]}
+        assert groups["1"] > groups["0"], "defaulters borrowed more"
 
     def test_compare_by_target(self, ctx) -> None:
         artifact = only(run_tool(ctx, "compare_by_target", {"column": "alder"}, question_id="q1"))
@@ -269,6 +310,39 @@ class TestRegressions:
         fit = fit_of(call)
         assert fit["f_test_p"] > 0.05 and fit["r_squared"] < 0.05
         assert not flag_codes(call)
+
+    def test_linear_regression_can_explain_another_number_in_a_side_question(self, ctx) -> None:
+        noise = np.random.default_rng(7).normal(0, 0.5, len(ctx.frame))
+        ctx.frame["rente"] = 2.0 + 0.03 * ctx.frame["alder"] + noise
+        ctx.kinds["rente"] = "numeric"
+        call = run_tool(
+            ctx,
+            "linear_regression",
+            {"outcome": "rente", "features": ["alder", "region"]},
+            question_id="q1",
+        )
+        age = effects_of(call)["alder"]
+        assert age["ci_low"] < 0.6 < age["ci_high"]
+        assert "linear regression of rente" in call.summary
+        assert ctx.target == "misligholdt" and ctx.catalog.get(call.artifacts[0].artifact_id)
+
+    def test_an_outcome_must_be_a_usable_column(self, ctx) -> None:
+        with pytest.raises(ToolError, match="kunde_id is a id column"):
+            run_tool(ctx, "linear_regression", {"outcome": "kunde_id"}, question_id="q1")
+        ctx.excluded = {"indkomst"}
+        with pytest.raises(ToolError, match="indkomst is excluded"):
+            run_tool(ctx, "linear_regression", {"outcome": "indkomst"}, question_id="q1")
+        with pytest.raises(ToolError, match="misligholdt is yes/no$"):
+            run_tool(
+                rate_ctx_like(ctx),
+                "linear_regression",
+                {"outcome": "misligholdt"},
+                question_id="q1",
+            )
+
+    def test_regression_results_say_what_chance_alone_would_show(self, ctx) -> None:
+        call = run_tool(ctx, "logistic_regression", {}, question_id="q1")
+        assert "of 8 effects, about 0.4 would show p<0.05 by chance alone" in call.summary
 
     def test_the_wrong_kind_of_target_is_refused(self, ctx, rate_ctx) -> None:
         with pytest.raises(ToolError, match="use logistic_regression"):

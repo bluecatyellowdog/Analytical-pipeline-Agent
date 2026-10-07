@@ -203,20 +203,31 @@ def _few_rows(rows: int, effects: int, what: str) -> Flag | None:
     )
 
 
+def _by_chance(effects: int) -> str:
+    """How many effects would look significant with no real pattern at all."""
+    return f"of {effects} effects, about {effects * 0.05:.1f} would show p<0.05 by chance alone"
+
+
 # -- linear regression ------------------------------------------------------
 
 
 class LinearParams(Params):
     features: list[str] | None = Field(default=None, description="Default: every usable column.")
+    outcome: str | None = Field(
+        default=None,
+        description="A numeric column to explain instead of the target, for a side question.",
+    )
 
 
 @register("linear_regression", LinearParams, ("drivers", "relationship"))
 def linear_regression(ctx: AnalysisContext, params: LinearParams) -> list[ToolResult]:
     """How a numeric target moves with each feature, the others held fixed (95% intervals)."""
+    side = params.outcome not in (None, ctx.target)
+    ctx = ctx.with_outcome(params.outcome)
     if ctx.target_type() != "numeric":
+        advice = "" if side else ": use logistic_regression"
         raise ToolError(
-            f"linear_regression needs a numeric target; {ctx.target} is yes/no: "
-            "use logistic_regression"
+            f"linear_regression needs a numeric outcome; {ctx.target} is yes/no{advice}"
         )
     features = ctx.features(params.features)
     design = _design(ctx, features, ctx.numeric_target())
@@ -267,7 +278,8 @@ def linear_regression(ctx: AnalysisContext, params: LinearParams) -> list[ToolRe
         f"linear regression of {ctx.target} on {', '.join(features)}: {len(design.y)} rows, "
         f"{_left_out_text(design)}; R² {metrics['r_squared']:.2f} (adjusted "
         f"{metrics['adjusted_r_squared']:.2f}); model vs no model (F-test) "
-        f"{_p(metrics['f_test_p'])}; typical error {fmt(metrics['residual_std'])}"
+        f"{_p(metrics['f_test_p'])}; typical error {fmt(metrics['residual_std'])}; "
+        f"{_by_chance(len(rows))}"
     )
     effects_text = f"Change in {ctx.target} (95% interval): " + "; ".join(
         f"{r['feature']} {_signed(r['effect'])} {r['per']} "
@@ -438,7 +450,8 @@ def logistic_regression(ctx: AnalysisContext, params: LogisticParams) -> list[To
 
     fit_text += (
         f"; model vs no model (likelihood ratio) {_p(metrics['lr_test_p'])}; pseudo R² "
-        f"{metrics['pseudo_r_squared'] or 0:.2f}; AUC {metrics['auc']:.2f} on the same rows"
+        f"{metrics['pseudo_r_squared'] or 0:.2f}; AUC {metrics['auc']:.2f} on the same rows; "
+        f"{_by_chance(len(rows))}"
     )
     effects_text = "Odds ratios (1 = no effect; 95% interval): " + "; ".join(
         f"{r['feature']} x{r['odds_ratio']:.2f} {r['per']} "

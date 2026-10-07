@@ -20,7 +20,7 @@ from pipeline.checks.schema import (
 )
 from pipeline.contracts.audit import CheckResult, GateResult, OpRecord
 from pipeline.contracts.cleaning import CleaningPlan
-from pipeline.contracts.common import Flag, GateOutcome
+from pipeline.contracts.common import CheckLayer, Flag, GateOutcome, Severity
 from pipeline.contracts.context_brief import ClaimResult, ContextBrief
 from pipeline.contracts.diagnosis import Diagnosis
 from pipeline.contracts.handoff import ColumnSchema
@@ -69,6 +69,25 @@ def build_gate(
         flags=list(flags),
         attempt=attempt,
     )
+
+
+def checked(
+    name: str, layer: CheckLayer, severity: Severity, problems: list[str], ok: str
+) -> CheckResult:
+    """A check from the problems it found: passed when there are none, each one listed."""
+    return CheckResult(
+        name=name,
+        layer=layer,
+        passed=not problems,
+        severity=severity,
+        message="; ".join(problems) if problems else ok,
+        observed={"problems": problems} if problems else {},
+    )
+
+
+def problems_of(gate: GateResult) -> list[str]:
+    """Every failure as one line, for an agent or the user to act on."""
+    return [p for check in gate.failures for p in check.observed.get("problems", [check.message])]
 
 
 def gate_1_ingestion(
