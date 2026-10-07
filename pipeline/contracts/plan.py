@@ -26,9 +26,9 @@ QuestionKind = Literal[
     "relationship",
     "segment",
     "drivers",
-    "prediction",
     "data_quality",
 ]
+"""No 'prediction': the analysis describes, it does not build prediction models (D033)."""
 
 MIN_QUESTIONS = 3
 MAX_QUESTIONS = 5

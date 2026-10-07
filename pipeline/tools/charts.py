@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt  # noqa: E402 - the backend must be chosen first
 
 BAR = "#4c72b0"
 REFERENCE = "#c44e52"
+LOG_TICKS = (0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100)
 
 
 def _figure(title: str, height: float = 3.4):
@@ -82,15 +83,43 @@ def boxes(stats: list[dict], *, title: str, ylabel: str):
     return figure
 
 
-def horizontal_bars(labels: Sequence[str], values: Sequence[float], *, title: str, xlabel: str):
+def forest(
+    labels: Sequence[str],
+    values: Sequence[float],
+    lower: Sequence[float],
+    upper: Sequence[float],
+    *,
+    title: str,
+    xlabel: str,
+    reference: float,
+    log: bool = False,
+):
+    """Effects as points with their 95% intervals, against the line of 'no effect'."""
+    if log:
+        # An interval that runs off to 0 or infinity is drawn to the edge of the chart.
+        lower = [min(max(lo, 1e-3), v) for v, lo in zip(values, lower, strict=True)]
+        upper = [max(min(hi, 1e3), v) for v, hi in zip(values, upper, strict=True)]
     height = max(2.2, 0.32 * len(values) + 1.0)
     figure, axes = _figure(title, height=height)
-    positions = range(len(values))
-    colours = [BAR if v >= 0 else REFERENCE for v in values]
-    axes.barh(list(positions), values, color=colours)
-    axes.set_yticks(list(positions), [str(label) for label in labels])
+    positions = list(range(len(values)))
+    errors = [
+        [max(v - lo, 0) for v, lo in zip(values, lower, strict=True)],
+        [max(hi - v, 0) for v, hi in zip(values, upper, strict=True)],
+    ]
+    axes.errorbar(
+        values, positions, xerr=errors, fmt="o", color=BAR, ecolor="#444444", capsize=3, ms=4
+    )
+    axes.set_yticks(positions, [str(label) for label in labels])
     axes.invert_yaxis()
-    axes.axvline(0, color="#444444", linewidth=0.8)
+    axes.axvline(reference, color=REFERENCE, linewidth=0.8, linestyle="--")
+    if log:
+        axes.set_xscale("log")
+        left = min(max(min(lower), 0.01), reference) / 1.2
+        right = max(min(max(upper), 100), reference) * 1.2
+        axes.set_xlim(left, right)
+        ticks = [t for t in LOG_TICKS if left <= t <= right]
+        axes.set_xticks(ticks, [f"{t:g}" for t in ticks])
+        axes.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
     axes.set_xlabel(xlabel, fontsize=8)
     figure.tight_layout()
     return figure

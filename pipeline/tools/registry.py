@@ -2,7 +2,7 @@
 
 The rule from cleaning carries over: the LLM decides, tools compute. A tool is a
 tested function over the clean data that returns aggregates only (rates, counts,
-summaries, model scores), never rows. Every call is validated against the
+summaries, regression effects), never rows. Every call is validated against the
 tool's parameters, refused if it would use the target, an ID, an excluded or
 personal column as a feature, and turned into artifacts that point back to the
 call and the plan question they answer. Groups smaller than MIN_GROUP_N are
@@ -120,19 +120,47 @@ class AnalysisContext:
             raise ToolError("no usable feature columns")
         return usable
 
+    def target_type(self) -> str:
+        """'binary' for a yes/no target, 'numeric' for a number; refused otherwise."""
+        if not self.target:
+            raise ToolError("there is no target column to compare against")
+        try:
+            self.binary_target()
+        except ToolError:
+            if self.kinds.get(self.target) == "numeric":
+                return "numeric"
+            raise ToolError(f"the target {self.target} is neither yes/no nor a number") from None
+        return "binary"
+
+    def numeric_target(self) -> pd.Series:
+        """The target as numbers, missing where it is missing. Refused if it is not numeric."""
+        if not self.target:
+            raise ToolError("there is no target column to compare against")
+        if self.kinds.get(self.target) != "numeric":
+            raise ToolError(f"the target {self.target} is not a number")
+        return pd.to_numeric(self.frame[self.target]).astype("Float64")
+
     def binary_target(self) -> pd.Series:
         """The target as 0/1, missing where it is missing. Refused if it is not binary."""
         if not self.target:
             raise ToolError("there is no target column to compare against")
-        mapping = {1: 1, 0: 0, "1": 1, "0": 0, "true": 1, "false": 0}  # True == 1, False == 0
-        raw = self.frame[self.target]
-        values = raw.map(lambda v: mapping.get(v.lower() if isinstance(v, str) else v))
-        present = raw.notna()
-        if values[present].isna().any() or values[present].nunique() > 2:
+        values = as_yes_no(self.frame[self.target])
+        if values is None:
             raise ToolError(
                 f"the target {self.target} is not binary; this tool needs a yes/no target"
             )
-        return values.astype("Float64")
+        return values
+
+
+YES_NO = {1: 1, 0: 0, "1": 1, "0": 0, "true": 1, "false": 0}  # True == 1, False == 0
+
+
+def as_yes_no(values: pd.Series) -> pd.Series | None:
+    """The values as 0/1, missing where missing; None if they do not all read as yes/no."""
+    mapped = values.map(lambda v: YES_NO.get(v.lower() if isinstance(v, str) else v))
+    if mapped[values.notna()].isna().any():
+        return None
+    return mapped.astype("Float64")
 
 
 @dataclass(frozen=True)
