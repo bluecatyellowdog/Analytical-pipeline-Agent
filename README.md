@@ -19,7 +19,7 @@ More detail: [specification](docs/project_spec.pdf) · [working rules](CLAUDE.md
 | 3. Diagnose | AI: analyst | Lists the problems to fix and the judgment calls (questions the data cannot answer on its own), and decides those calls from your brief. | `pipeline.agents.analyst` |
 | 4. Check decisions | You (optional) | Change any of the AI's decisions in `decisions.yaml`. | edit a YAML file |
 | 5. Clean | AI: coder and reviewer | The coder writes a cleaning plan, which runs step by step from the original data. **Gate 2** checks the result. The reviewer checks that it makes sense and can send fixes back, at most twice. | `pipeline.clean` |
-| 6. Read the report | You | `cleaning_report.md` shows what changed, what the AI decided and what needs your attention. To change something, edit `decisions.yaml` and run step 5 again. | – |
+| 6. Read the report | You | `run_report.pdf` opens with a one-page summary, then tells the whole story: the dirty data, what was wrong, every change (with any code the AI wrote), the checks and the review. To change something, edit `decisions.yaml` and run step 5 again. | – |
 
 Steps 2, 3 and 5 run in one go with `pipeline.run`; the separate commands do the same work one step at a time.
 
@@ -54,7 +54,7 @@ uv run pytest
 uv run python -m pipeline.run tests/fixtures/danish_semicolon.csv --brief examples/context_brief.yaml
 ```
 
-It ingests, diagnoses and cleans the file, then prints a short summary ending with the report to open. `runs/index.md` lists every run.
+It ingests, diagnoses and cleans the file, then prints a short summary and where the PDF report is. `runs/index.md` lists every run.
 
 Or step by step, which does exactly the same:
 
@@ -109,7 +109,8 @@ Every decision appears in two places:
 | `profile_llm.json` | ingest | The masked summary: the only view of the data the AI ever gets |
 | `diagnosis.md` | analyst | The problems found, and the judgment calls with their decisions |
 | `decisions.yaml` | analyst, then you | The decisions on judgment calls; edit to change |
-| `cleaning_report.md` | clean | **Start here.** The AI's decisions, what needs your attention, Gate 2, every step and the review |
+| `run_report.pdf` | run, clean | **Start here.** A one-page summary, then the dirty data, what was wrong, every change and the AI's code, the checks and the review. No personal data. |
+| `cleaning_report.md` | clean | The same story in Markdown, with the technical detail |
 | `clean_data.csv` / `.parquet` | clean | The cleaned data, written only when Gate 2 does not block |
 | `handoff.json`, `schema_contract.yaml` | clean | What the clean data is, for you and for later stages |
 | `dropped_rows.csv` | clean | Every removed row, with the reason |
@@ -183,6 +184,7 @@ Command options:
 | [pipeline/checks/](pipeline/checks/) | Gates 1 and 2, the reconciliation checks and the schema contract |
 | [pipeline/tools/](pipeline/tools/) | The reviewer's query tool |
 | [pipeline/run.py](pipeline/run.py) | The one command for the whole workflow |
+| [pipeline/report_pdf.py](pipeline/report_pdf.py) | The PDF run report, rebuilt from the run folder (`python -m pipeline.report_pdf runs/<folder>`) |
 | [pipeline/ingest.py](pipeline/ingest.py), [pipeline/clean.py](pipeline/clean.py) | The commands for steps 2 and 5 |
 | [tests/fixtures/](tests/fixtures/) | Ten deliberately difficult files, with their expected results in [expected.yaml](tests/fixtures/expected.yaml) |
 

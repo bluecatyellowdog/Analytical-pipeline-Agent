@@ -952,6 +952,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     result = outcome.result
+    from pipeline.report_pdf import build_pdf
+
+    pdf = build_pdf(run_dir)
     review_line = (
         f" Review: {outcome.status.upper()} after {len(outcome.reviews)} round(s)."
         if reviewing and not result.blocked
@@ -963,6 +966,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     for note in outcome.notes:
         print(f"Note: {note}")
+    print(f"PDF report: {pdf.resolve()}")
     print(f"Report:     {(run_dir / CLEANING_REPORT).resolve()}")
     if result.blocked:
         print("No clean data was written; the report says why.")

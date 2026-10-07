@@ -16,6 +16,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from pipeline import clean
 from pipeline.agents import analyst
@@ -26,6 +27,7 @@ from pipeline.contracts.context_brief import load_context_brief
 from pipeline.ingest import INDEX_FILENAME, IngestionResult, default_out_dir, ingest, update_index
 from pipeline.ingestion.raw import RawStore
 from pipeline.report import REPORT_FILENAME
+from pipeline.report_pdf import PDF_FILENAME, build_pdf
 
 
 @dataclass
@@ -37,6 +39,7 @@ class RunSummary:
     reason: str | None = None
     diagnosis: analyst.AnalystResult | None = None
     cleaning: clean.CleaningOutcome | None = None
+    pdf_error: str | None = None
 
     @property
     def cost_usd(self) -> float:
@@ -46,6 +49,21 @@ class RunSummary:
 
 
 def run_all(
+    source: str | Path,
+    brief_path: str | Path | None,
+    client: LLMClient,
+    **options: Any,
+) -> RunSummary:
+    """Ingest, diagnose and clean one file into one run folder, then write the PDF report."""
+    summary = _run_steps(source, brief_path, client, **options)
+    try:
+        build_pdf(summary.run_dir)
+    except Exception as error:  # noqa: BLE001 - a failed PDF must not lose a finished run
+        summary.pdf_error = f"{type(error).__name__}: {error}"
+    return summary
+
+
+def _run_steps(
     source: str | Path,
     brief_path: str | Path | None,
     client: LLMClient,
@@ -59,7 +77,6 @@ def run_all(
     sheet: str | None = None,
     seed: int = 42,
 ) -> RunSummary:
-    """Ingest, diagnose and clean one file into one run folder."""
     provider = provider or {}
     brief = load_context_brief(brief_path) if brief_path else None
     with RawStore.open() as store:
@@ -109,7 +126,11 @@ def summarise(summary: RunSummary) -> str:
     """What happened at each step, what it cost, and which file to open."""
     folder = summary.run_dir
     load = summary.ingestion.load_result
+    pdf = folder / PDF_FILENAME
     lines = [
+        f"PDF report: {pdf.resolve()}"
+        if pdf.exists()
+        else f"PDF report failed: {summary.pdf_error}",
         f"Run folder: {folder.resolve()}",
         "",
         f"1. Ingest    {load.n_loaded:,} rows loaded, {load.n_rejected:,} rejected. "
