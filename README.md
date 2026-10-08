@@ -207,6 +207,8 @@ The analysis agent does not write code: it picks from a fixed set of tested tool
 | `distribution` | How are a column's values spread? |
 | `target_by_group` | What is the outcome in each group or range? The rate for a yes/no outcome, the average for a number, with 95% intervals. |
 | `target_by_two_groups` | Does a difference hold in every group? The outcome for every combination of two columns, e.g. sex within each class. |
+| `target_by_ratio` | Does the outcome follow one number relative to another, e.g. loan amount ÷ income? |
+| `trend_over_time` | How does the outcome change per year, quarter or month of a date? Rows per period when there is no outcome. |
 | `compare_by_target` | How does a number differ between the two outcomes of a yes/no target? |
 | `correlation` | Which numbers move together? |
 | `missingness` | Where are values missing, and does that relate to the outcome? |
@@ -293,7 +295,6 @@ Rules every tool follows:
 
 ## Next
 
-1. **Subgroups:** a tool that looks inside one group, or crosses two groupings, so questions like "does sex matter as much in third class?" can be answered.
-2. **Five-dataset run:** the whole workflow on five public datasets, to see how the findings hold up on data other than Titanic.
+1. **Five-dataset run:** the whole workflow on five public datasets, to see how the findings hold up on data other than Titanic.
 
 Later: canary rows (test rows with known answers, checked on every run) and real messy datasets for the benchmark.
