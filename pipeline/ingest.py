@@ -26,6 +26,7 @@ from pipeline.ingestion.compact import compact_profile, render_profile_lines
 from pipeline.ingestion.loaders import load
 from pipeline.ingestion.profiler import profile_table
 from pipeline.ingestion.raw import RawStore, RawTable
+from pipeline.layout import DATA_COLUMNS_XLSX, REPORT_PDF, ensure_layout, run_file
 from pipeline.report import (
     REJECTS_FILENAME,
     REPORT_FILENAME,
@@ -34,7 +35,7 @@ from pipeline.report import (
     render_ingestion_report,
     write_rejected_csv,
 )
-from pipeline.report_xlsx import XLSX_FILENAME, write_ingestion_xlsx
+from pipeline.report_xlsx import write_ingestion_xlsx
 from pipeline.runtime import git_is_dirty, git_sha, pipeline_version, platform_name, python_version
 
 PLACEHOLDER_BRIEF = ContextBrief(
@@ -65,8 +66,7 @@ class IngestionResult:
 
     def write(self, out_dir: str | Path) -> Path:
         """Write every artifact as JSON, plus the report and the rejected lines."""
-        directory = Path(out_dir)
-        directory.mkdir(parents=True, exist_ok=True)
+        directory = ensure_layout(Path(out_dir))
 
         documents = {
             "manifest.json": self.manifest,
@@ -75,11 +75,11 @@ class IngestionResult:
             "gate_1.json": self.gate,
         }
         for filename, document in documents.items():
-            (directory / filename).write_text(
+            run_file(directory, filename).write_text(
                 document.model_dump_json(indent=2, by_alias=True), encoding="utf-8"
             )
 
-        (directory / "claims.json").write_text(
+        run_file(directory, "claims.json").write_text(
             json.dumps(
                 [r.model_dump(mode="json") for r in self.claim_results],
                 indent=2,
@@ -87,17 +87,19 @@ class IngestionResult:
             ),
             encoding="utf-8",
         )
-        (directory / "profile_llm.json").write_text(
+        run_file(directory, "profile_llm.json").write_text(
             json.dumps(
                 compact_profile(self.profile, self.claim_results), indent=2, ensure_ascii=False
             ),
             encoding="utf-8",
         )
-        (directory / "profile.txt").write_text(render_profile_lines(self.profile), encoding="utf-8")
-        (directory / REPORT_FILENAME).write_text(self.report, encoding="utf-8")
-        write_rejected_csv(self.load_result.rejects, directory / REJECTS_FILENAME)
+        run_file(directory, "profile.txt").write_text(
+            render_profile_lines(self.profile), encoding="utf-8"
+        )
+        run_file(directory, REPORT_FILENAME).write_text(self.report, encoding="utf-8")
+        write_rejected_csv(self.load_result.rejects, run_file(directory, REJECTS_FILENAME))
         write_ingestion_xlsx(
-            directory / XLSX_FILENAME,
+            run_file(directory, DATA_COLUMNS_XLSX),
             self.load_result,
             self.profile,
             self.gate,
@@ -198,8 +200,7 @@ def update_index(result: IngestionResult, directory: Path, source: str | Path) -
     row = (
         f"| {datetime.now():%Y-%m-%d %H:%M} | {Path(source).name} | {load.n_loaded:,} "
         f"| {load.n_rejected:,} | {result.gate.outcome.upper()} "
-        f"| [{directory.name}]({directory.name}/{REPORT_FILENAME}) "
-        f"· [Excel]({directory.name}/{XLSX_FILENAME}) |\n"
+        f"| [{directory.name}]({directory.name}/{REPORT_PDF}) |\n"
     )
     existing = index.read_text(encoding="utf-8") if index.exists() else header
     head, _, rows = existing.partition("| --- | --- | --- | --- | --- | --- |\n")
@@ -231,14 +232,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(_summarise(result))
         directory = result.write(args.out or default_out_dir(args.path))
-        print(f"\nWrote {len(list(directory.iterdir()))} files to {directory.resolve()}")
-        print(f"Read the report: {(directory / REPORT_FILENAME).resolve()}")
-        print(f"Excel overview:  {(directory / XLSX_FILENAME).resolve()}")
-        if result.load_result.n_rejected:
-            print(f"Rejected lines:  {(directory / REJECTS_FILENAME).resolve()}")
-        if not args.out:
-            print(f"All runs:        {update_index(result, directory, args.path).resolve()}")
+    from pipeline.reports import build_reports  # the reports read every step; import late
 
+    print(f"\nRun folder: {directory.resolve()}")
+    print(f"The report: {build_reports(directory).resolve()}")
+    if result.load_result.n_rejected:
+        print(f"Rejected lines: {run_file(directory, REJECTS_FILENAME).resolve()}")
+    if not args.out:
+        print(f"All runs: {update_index(result, directory, args.path).resolve()}")
     return 1 if result.blocked else 0
 
 

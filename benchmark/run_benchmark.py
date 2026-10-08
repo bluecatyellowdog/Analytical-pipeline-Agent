@@ -29,6 +29,7 @@ from benchmark.injectors import Corrupted, inject
 from benchmark.metrics import CaseScore, score_case
 from benchmark.scenarios import SCENARIOS, Scenario
 from pipeline.contracts.diagnosis import Diagnosis
+from pipeline.layout import run_file
 
 
 @dataclass
@@ -121,16 +122,16 @@ def load_clean_rows(path: Path) -> list[dict[str, Any]]:
 
 def score_run(case: Case, data: CleanDataset, info: RunInfo) -> CaseScore:
     run_dir = info.run_dir
-    clean_path = run_dir / "clean_data.parquet" if run_dir else None
+    clean_path = run_file(run_dir, "clean_data.parquet") if run_dir else None
     clean_rows = load_clean_rows(clean_path) if clean_path and clean_path.exists() else None
-    diagnosis_path = run_dir / "diagnosis.json" if run_dir else None
+    diagnosis_path = run_file(run_dir, "diagnosis.json") if run_dir else None
     diagnosis = (
         Diagnosis.model_validate_json(diagnosis_path.read_text(encoding="utf-8"))
         if diagnosis_path and diagnosis_path.exists()
         else None
     )
     renames = {}
-    handoff_path = run_dir / "handoff.json" if run_dir else None
+    handoff_path = run_file(run_dir, "handoff.json") if run_dir else None
     if handoff_path and handoff_path.exists():
         handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
         renames = {
@@ -310,7 +311,7 @@ def write_summary(results: list[CaseResult], out_dir: Path, meta: dict[str, Any]
         if result.score.false_alarms:
             lines += ["", "False alarms:", *[f"- {a}" for a in result.score.false_alarms]]
         if result.info.run_dir:
-            lines += ["", f"Run folder: `{result.info.run_dir.as_posix()}` (see run_report.pdf)"]
+            lines += ["", f"Run folder: `{result.info.run_dir.as_posix()}` (see REPORT.pdf)"]
     path = out_dir / "summary.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path

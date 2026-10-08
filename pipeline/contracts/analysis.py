@@ -92,6 +92,14 @@ class WriteUp(Strict):
     answers: list[QuestionAnswer]
     findings: list[Finding]
     limitations: list[str] = Field(default_factory=list)
+    doubts: list[str] = Field(
+        default_factory=list,
+        description="Self-critical: what in these findings might be wrong or misleading, and why.",
+    )
+    recommendations: list[str] = Field(
+        default_factory=list,
+        description="Concrete next steps for the user: what to check, change, add or ask next.",
+    )
     next_questions: list[str] = Field(
         default_factory=list, description="What would be worth looking at next."
     )

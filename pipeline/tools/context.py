@@ -20,6 +20,7 @@ from pipeline.checks.schema import type_fits, validate_against_contract
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.handoff import ColumnSchema, Handoff
 from pipeline.ingestion.raw import RESERVED_COLUMNS
+from pipeline.layout import run_file, upgrade_layout
 from pipeline.tools.eda import fmt
 from pipeline.tools.registry import AnalysisContext, as_yes_no
 
@@ -99,7 +100,8 @@ def task_type_of(ctx: AnalysisContext) -> str:
 
 
 def read_handoff(run_dir: Path) -> Handoff:
-    path = run_dir / HANDOFF_FILE
+    upgrade_layout(run_dir)
+    path = run_file(run_dir, HANDOFF_FILE)
     if not path.exists():
         raise AnalysisInputError(
             "there is no clean data to analyse (no handoff.json): clean the data first, or "
@@ -114,7 +116,7 @@ def load_context(
     """The clean data of a run folder, checked against its contract, with every column's kind."""
     handoff = handoff or read_handoff(run_dir)
     brief = load_manifest(run_dir).context_brief
-    data = run_dir / (handoff.data_file or "clean_data.parquet")
+    data = run_file(run_dir, handoff.data_file or "clean_data.parquet")
     if not data.exists():
         raise AnalysisInputError(f"the clean data file {data.name} is missing from {run_dir}")
 

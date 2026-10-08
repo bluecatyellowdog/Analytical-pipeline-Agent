@@ -218,6 +218,8 @@ FIXTURE_ANALYSIS_REPLIES = [
                 },
             ],
             "limitations": ["Only 12 rows."],
+            "doubts": ["With so few loans, one unusual amount can move every summary."],
+            "recommendations": ["Collect more loans before reading much into the amounts."],
         }
     ),
 ]

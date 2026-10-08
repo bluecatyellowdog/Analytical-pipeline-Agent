@@ -166,6 +166,8 @@ def _untraced_numbers(
         check(answer.question_id, [answer.answer, answer.reason], values, cited)
     check("summary", [write_up.summary], everything, "of any call")
     check("limitations", write_up.limitations, everything, "of any call")
+    check("doubts", write_up.doubts, everything, "of any call")
+    check("recommendations", write_up.recommendations, everything, "of any call")
     check("next_questions", write_up.next_questions, everything, "of any call")
     return list(dict.fromkeys(problems))
 

@@ -57,6 +57,7 @@ from pipeline.ingestion.compact import compact_profile
 from pipeline.ingestion.loaders import load
 from pipeline.ingestion.profiler import profile_table
 from pipeline.ingestion.raw import ROW_ID, RawStore, RawTable, quote_ident
+from pipeline.layout import is_run_folder, run_file
 from pipeline.tools.queries import QueryContext
 
 CLEANING_PLAN = "cleaning_plan.json"
@@ -125,7 +126,7 @@ def load_inputs(run_dir: Path) -> FolderInputs:
             "Gate 1 blocked this load, so it may not be cleaned. Fix the problems in "
             "ingestion_report.md and ingest the file again."
         )
-    if not (run_dir / DIAGNOSIS_JSON).exists():
+    if not run_file(run_dir, DIAGNOSIS_JSON).exists():
         raise RunFolderError(
             "there is no diagnosis yet. Run the analyst first:\n"
             f"  uv run python -m pipeline.agents.analyst {run_dir.as_posix()}"
@@ -134,9 +135,9 @@ def load_inputs(run_dir: Path) -> FolderInputs:
         raise RunFolderError("the manifest records no input file")
 
     diagnosis = Diagnosis.model_validate_json(
-        (run_dir / DIAGNOSIS_JSON).read_text(encoding="utf-8")
+        run_file(run_dir, DIAGNOSIS_JSON).read_text(encoding="utf-8")
     )
-    profile_llm = json.loads((run_dir / "profile_llm.json").read_text(encoding="utf-8"))
+    profile_llm = json.loads(run_file(run_dir, "profile_llm.json").read_text(encoding="utf-8"))
     info = manifest.inputs[0]
     source = Path(info.path)
     if not source.exists():
@@ -147,7 +148,7 @@ def load_inputs(run_dir: Path) -> FolderInputs:
     return FolderInputs(
         manifest=manifest,
         diagnosis=diagnosis,
-        decisions=load_decisions(run_dir / DECISIONS_FILE, diagnosis),
+        decisions=load_decisions(run_file(run_dir, DECISIONS_FILE), diagnosis),
         profile_llm=profile_llm,
         source=source,
         sheet=info.sheet,
@@ -192,7 +193,7 @@ def clean_folder(
                 run_id=manifest.run_id,
             )
         except CoderError as error:
-            write_attempt_log(run_dir / CODER_LOG, error.attempts, coder_prompt_version())
+            write_attempt_log(run_file(run_dir, CODER_LOG), error.attempts, coder_prompt_version())
             record_in_manifest(manifest, "coder", provider, error.attempts, coder_prompt_version())
             manifest.stage_status["cleaning"] = "blocked"
             save_manifest(run_dir, manifest)
@@ -379,12 +380,14 @@ def _write_outputs(
 ) -> None:
     """The logs and the report always; clean data, handoff and contract only past Gate 2."""
     for name in DELIVERABLES:
-        (run_dir / name).unlink(missing_ok=True)
+        run_file(run_dir, name).unlink(missing_ok=True)
 
     result = outcome.result
     run, gate = result.run, result.gate
     rows_clean = store.row_count(run.clean_table)
-    (run_dir / CLEANING_PLAN).write_text(result.plan.model_dump_json(indent=2), encoding="utf-8")
+    run_file(run_dir, CLEANING_PLAN).write_text(
+        result.plan.model_dump_json(indent=2), encoding="utf-8"
+    )
     log = {
         "raw_table": raw.name,
         "clean_table": run.clean_table,
@@ -394,13 +397,13 @@ def _write_outputs(
         "records": [r.model_dump(mode="json") for r in run.records],
         "gate_2": gate.model_dump(mode="json"),
     }
-    (run_dir / CLEANING_LOG).write_text(
+    run_file(run_dir, CLEANING_LOG).write_text(
         json.dumps(log, indent=2, ensure_ascii=False), encoding="utf-8"
     )
-    write_attempt_log(run_dir / CODER_LOG, outcome.coder_attempts, coder_prompt_version())
-    (run_dir / GATE_2_FILE).write_text(gate.model_dump_json(indent=2), encoding="utf-8")
+    write_attempt_log(run_file(run_dir, CODER_LOG), outcome.coder_attempts, coder_prompt_version())
+    run_file(run_dir, GATE_2_FILE).write_text(gate.model_dump_json(indent=2), encoding="utf-8")
     if outcome.reviews or outcome.review_failures:
-        (run_dir / REVIEW_LOG).write_text(
+        run_file(run_dir, REVIEW_LOG).write_text(
             json.dumps(_review_log(outcome), indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
@@ -408,25 +411,25 @@ def _write_outputs(
         _copy(
             store,
             f"SELECT * EXCLUDE ({ROW_ID}) FROM {_qualified(run.dropped_table)} ORDER BY {ROW_ID}",
-            run_dir / DROPPED_CSV,
+            run_file(run_dir, DROPPED_CSV),
             "HEADER, DELIMITER ','",
         )
     if not result.blocked:
         clean = f"SELECT * EXCLUDE ({ROW_ID}) FROM {_qualified(run.clean_table)} ORDER BY {ROW_ID}"
-        _copy(store, clean, run_dir / CLEAN_PARQUET, "FORMAT parquet")
-        _copy(store, clean, run_dir / CLEAN_CSV, "HEADER, DELIMITER ','")
+        _copy(store, clean, run_file(run_dir, CLEAN_PARQUET), "FORMAT parquet")
+        _copy(store, clean, run_file(run_dir, CLEAN_CSV), "HEADER, DELIMITER ','")
         handoff = _handoff(store, raw, outcome, inputs, rows_clean=rows_clean)
-        (run_dir / HANDOFF_FILE).write_text(
+        run_file(run_dir, HANDOFF_FILE).write_text(
             handoff.model_dump_json(indent=2, by_alias=True), encoding="utf-8"
         )
-        (run_dir / SCHEMA_CONTRACT_FILE).write_text(
+        run_file(run_dir, SCHEMA_CONTRACT_FILE).write_text(
             _contract_yaml(handoff, gate.outcome), encoding="utf-8"
         )
 
     report = render_report(
         outcome, inputs, rows_raw=raw.n_rows, rows_clean=rows_clean, run_dir=run_dir
     )
-    (run_dir / CLEANING_REPORT).write_text(report, encoding="utf-8")
+    run_file(run_dir, CLEANING_REPORT).write_text(report, encoding="utf-8")
 
 
 def _handoff(
@@ -917,8 +920,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     run_dir = Path(args.run_dir)
 
-    if not (run_dir / "manifest.json").exists():
-        print(f"{run_dir} is not a run folder (no manifest.json).")
+    if not is_run_folder(run_dir):
+        print(f"{run_dir} is not a run folder (no logs/manifest.json).")
         return 1
     try:
         client = connect()
@@ -948,13 +951,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Cannot clean yet: {error}")
         return 1
     except CoderError as error:
-        print(f"\n{error}\nEvery attempt is logged in {(run_dir / CODER_LOG).resolve()}")
+        print(f"\n{error}\nEvery attempt is logged in {run_file(run_dir, CODER_LOG).resolve()}")
         return 1
 
     result = outcome.result
-    from pipeline.report_pdf import build_pdf
+    from pipeline.reports import build_reports  # the reports read every step; import late
 
-    pdf = build_pdf(run_dir)
+    report = build_reports(run_dir)
     review_line = (
         f" Review: {outcome.status.upper()} after {len(outcome.reviews)} round(s)."
         if reviewing and not result.blocked
@@ -966,13 +969,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     for note in outcome.notes:
         print(f"Note: {note}")
-    print(f"PDF report: {pdf.resolve()}")
-    print(f"Report:     {(run_dir / CLEANING_REPORT).resolve()}")
+    print(f"Start here: {report.resolve()}")
     if result.blocked:
         print("No clean data was written; the report says why.")
         return 1
-    print(f"Clean data: {(run_dir / CLEAN_CSV).resolve()}")
-    print(f"Handoff:    {(run_dir / HANDOFF_FILE).resolve()}")
+    print(f"Clean data: {run_file(run_dir, CLEAN_CSV).resolve()}")
+    print(
+        "To update the findings for the new clean data, run "
+        f"`uv run python -m pipeline.analyze {run_dir.as_posix()}`."
+    )
     return 0
 
 

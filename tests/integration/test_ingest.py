@@ -259,20 +259,25 @@ class TestCli:
         )
         assert code == 0
 
-        written = {p.name for p in out.iterdir()}
+        written = {p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()}
         assert written == {
-            "manifest.json",
-            "load_result.json",
-            "profile.json",
-            "profile_llm.json",
-            "claims.json",
-            "gate_1.json",
-            "profile.txt",
-            "ingestion_report.md",
-            "ingestion_report.xlsx",
-            "rejected_lines.csv",
+            "REPORT.pdf",
+            "details/1_analysis.pdf",
+            "details/2_data_quality.pdf",
+            "details/2_data_columns.xlsx",
+            "details/3_decisions.pdf",
+            "details/4_audit.pdf",
+            "data/rejected_lines.csv",
+            "logs/manifest.json",
+            "logs/load_result.json",
+            "logs/profile.json",
+            "logs/profile_llm.json",
+            "logs/claims.json",
+            "logs/gate_1.json",
+            "logs/profile.txt",
+            "logs/ingestion_report.md",
         }
-        for path in out.glob("*.json"):
+        for path in (out / "logs").glob("*.json"):
             json.loads(path.read_text(encoding="utf-8"))
 
         assert "Gate 1: PASS" in capsys.readouterr().out
@@ -310,10 +315,10 @@ class TestCli:
 
         folders = [p for p in (tmp_path / "runs").iterdir() if p.is_dir()]
         assert len(folders) == 2
-        assert all((p / "ingestion_report.md").exists() for p in folders)
+        assert all((p / "REPORT.pdf").exists() for p in folders)
 
         index = (tmp_path / "runs" / "index.md").read_text(encoding="utf-8")
         assert "danish_semicolon.csv" in index
         assert "latin1_aeoeaa.csv" in index
-        assert index.count("ingestion_report.md") == 2
+        assert index.count("REPORT.pdf") == 2
         assert index.index("latin1_aeoeaa.csv") < index.index("danish_semicolon.csv")

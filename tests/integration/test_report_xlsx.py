@@ -7,7 +7,8 @@ from openpyxl import load_workbook
 
 from pipeline.ingest import ingest
 from pipeline.ingestion.raw import RawStore
-from pipeline.report_xlsx import SHEET_NAMES, XLSX_FILENAME
+from pipeline.layout import DATA_COLUMNS_XLSX, run_file
+from pipeline.report_xlsx import SHEET_NAMES
 
 
 @pytest.fixture
@@ -16,7 +17,7 @@ def run(fixtures_dir, tmp_path):
         with RawStore.open() as store:
             result = ingest(fixtures_dir / name, store=store)
         out = result.write(tmp_path / name)
-        return result, load_workbook(out / XLSX_FILENAME)
+        return result, load_workbook(run_file(out, DATA_COLUMNS_XLSX))
 
     return _run
 
@@ -79,7 +80,7 @@ class TestSafety:
         with RawStore.open() as store:
             result = ingest(path, store=store)
         out = result.write(tmp_path / "out")
-        book = load_workbook(out / XLSX_FILENAME)
+        book = load_workbook(run_file(out, DATA_COLUMNS_XLSX))
         cell = book["Rejected lines"]["C2"]
         assert cell.data_type == "s"
         assert cell.value.startswith("=1+1")

@@ -27,6 +27,7 @@ from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.handoff import Handoff
 from pipeline.ingest import ingest
 from pipeline.ingestion.raw import RawStore
+from pipeline.layout import run_file
 from tests.unit.test_coder import DIAGNOSIS, GOOD_STEPS, plan_json, step
 from tests.unit.test_decisions import ai_decided
 
@@ -101,7 +102,7 @@ def diagnose(folder) -> None:
 
 
 def decide(folder, **choices) -> None:
-    path = folder / DECISIONS_FILE
+    path = run_file(folder, DECISIONS_FILE)
     entries = yaml.safe_load(path.read_text(encoding="utf-8"))
     for call_id, choice in choices.items():
         entries[call_id]["decision"] = choice
@@ -121,18 +122,18 @@ def run_clean(folder, coder_replies, review_replies=None, **options):
 
 
 def manifest_of(folder) -> dict:
-    return json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    return json.loads(run_file(folder, "manifest.json").read_text(encoding="utf-8"))
 
 
 def report_of(folder) -> str:
-    return (folder / clean.CLEANING_REPORT).read_text(encoding="utf-8")
+    return run_file(folder, clean.CLEANING_REPORT).read_text(encoding="utf-8")
 
 
 class TestCleaning:
     def test_the_whole_flow_writes_clean_data_and_a_report(self, run_dir) -> None:
         folder, _ = run_dir
         diagnose(folder)
-        template = yaml.safe_load((folder / DECISIONS_FILE).read_text(encoding="utf-8"))
+        template = yaml.safe_load(run_file(folder, DECISIONS_FILE).read_text(encoding="utf-8"))
         assert template["J1"]["decision"] == "undecided"
 
         decide(folder, J1="Treat 999 as missing")
@@ -150,9 +151,9 @@ class TestCleaning:
             clean.HANDOFF_FILE,
             clean.SCHEMA_CONTRACT_FILE,
         ):
-            assert (folder / name).exists(), name
+            assert run_file(folder, name).exists(), name
 
-        parquet = (folder / clean.CLEAN_PARQUET).as_posix()
+        parquet = run_file(folder, clean.CLEAN_PARQUET).as_posix()
         rows, missing_amounts = duckdb.sql(
             "SELECT count(*), count(*) FILTER (WHERE beloeb IS NULL) "
             f"FROM read_parquet('{parquet}')"
@@ -177,12 +178,12 @@ class TestCleaning:
         run_clean(folder, [plan_json()])
 
         handoff = Handoff.model_validate_json(
-            (folder / clean.HANDOFF_FILE).read_text(encoding="utf-8")
+            run_file(folder, clean.HANDOFF_FILE).read_text(encoding="utf-8")
         )
         assert handoff.data_file == clean.CLEAN_PARQUET
         assert handoff.column("kunde_id").unique
         assert handoff.profile is not None and handoff.profile.n_rows == 12
-        data = (folder / handoff.data_file).as_posix()
+        data = run_file(folder, handoff.data_file).as_posix()
         checks = validate_against_contract(
             duckdb.connect(), f"read_parquet('{data}')", handoff.schema_
         )
@@ -193,15 +194,15 @@ class TestCleaning:
         folder, _ = run_dir
         diagnose(folder)
         run_clean(folder, [plan_json()])
-        assert (folder / clean.HANDOFF_FILE).exists()
+        assert run_file(folder, clean.HANDOFF_FILE).exists()
 
         blocked = plan_json([*GOOD_STEPS, CAST_ID])
         outcome = run_clean(folder, [blocked, blocked, blocked])
 
         assert outcome.result.blocked and outcome.status == "blocked"
         for name in clean.DELIVERABLES:
-            assert not (folder / name).exists(), name
-        assert (folder / clean.GATE_2_FILE).exists()
+            assert not run_file(folder, name).exists(), name
+        assert run_file(folder, clean.GATE_2_FILE).exists()
         report = report_of(folder)
         assert "**Gate 2: BLOCK.**" in report and "kunde_id" in report
         assert manifest_of(folder)["stage_status"]["cleaning"] == "blocked"
@@ -218,7 +219,7 @@ class TestReview:
         manifest = manifest_of(folder)
         assert manifest["stage_status"]["review"] == "accepted"
         assert {"coder", "reviewer"} <= set(manifest["models"])
-        log = json.loads((folder / clean.REVIEW_LOG).read_text(encoding="utf-8"))
+        log = json.loads(run_file(folder, clean.REVIEW_LOG).read_text(encoding="utf-8"))
         assert log["rounds"][0]["accepted"] is True
         assert "**Review: ACCEPTED.**" in report_of(folder)
 
@@ -231,7 +232,7 @@ class TestReview:
         assert outcome.status == "accepted"
         assert len(outcome.reviews) == 2
         assert not outcome.reviews[0].verdict.accepted
-        parquet = (folder / clean.CLEAN_PARQUET).as_posix()
+        parquet = run_file(folder, clean.CLEAN_PARQUET).as_posix()
         missing_emails = duckdb.sql(
             f"SELECT count(*) FILTER (WHERE email IS NULL) FROM read_parquet('{parquet}')"
         ).fetchone()[0]
@@ -250,7 +251,7 @@ class TestReview:
         assert len(outcome.reviews) == 3
         report = report_of(folder)
         assert "For you to look at" in report and "Unresolved fix request" in report
-        assert (folder / clean.HANDOFF_FILE).exists()
+        assert run_file(folder, clean.HANDOFF_FILE).exists()
 
     def test_ambiguities_are_reported_to_the_user(self, run_dir) -> None:
         folder, _ = run_dir
@@ -264,7 +265,7 @@ class TestReview:
 
         assert outcome.status == "accepted"
         assert "Does 999 mean unknown in every year?" in report_of(folder)
-        handoff = json.loads((folder / clean.HANDOFF_FILE).read_text(encoding="utf-8"))
+        handoff = json.loads(run_file(folder, clean.HANDOFF_FILE).read_text(encoding="utf-8"))
         assert any(f["code"] == "review_ambiguity" for f in handoff["flags"])
 
     def test_the_budget_stops_the_loop_between_rounds(self, run_dir) -> None:
@@ -286,7 +287,7 @@ class TestReview:
         assert not outcome.result.blocked
         assert any("previous result is kept" in note for note in outcome.notes)
         handoff = Handoff.model_validate_json(
-            (folder / clean.HANDOFF_FILE).read_text(encoding="utf-8")
+            run_file(folder, clean.HANDOFF_FILE).read_text(encoding="utf-8")
         )
         assert handoff.column("kunde_id").dtype == "VARCHAR"
 
@@ -308,7 +309,7 @@ class TestRefusals:
     def test_decisions_for_unknown_calls_are_refused(self, run_dir) -> None:
         folder, _ = run_dir
         diagnose(folder)
-        (folder / DECISIONS_FILE).write_text("J9:\n  decision: yes\n", encoding="utf-8")
+        run_file(folder, DECISIONS_FILE).write_text("J9:\n  decision: yes\n", encoding="utf-8")
         with pytest.raises(DecisionsError, match="J9"):
             run_clean(folder, [])
 
@@ -317,7 +318,7 @@ class TestRefusals:
         diagnose(folder)
         decide(folder, J1="Keep 999")
         diagnose(folder)
-        assert "Keep 999" in (folder / DECISIONS_FILE).read_text(encoding="utf-8")
+        assert "Keep 999" in run_file(folder, DECISIONS_FILE).read_text(encoding="utf-8")
 
     def test_a_failed_coder_marks_the_stage_blocked_and_logs_every_attempt(self, run_dir) -> None:
         folder, _ = run_dir
@@ -326,7 +327,7 @@ class TestRefusals:
             run_clean(folder, ["no", "no", "no"])
 
         assert manifest_of(folder)["stage_status"]["cleaning"] == "blocked"
-        log = json.loads((folder / clean.CODER_LOG).read_text(encoding="utf-8"))
+        log = json.loads(run_file(folder, clean.CODER_LOG).read_text(encoding="utf-8"))
         assert len(log["attempts"]) == 3
 
 
@@ -368,7 +369,7 @@ class TestAIDecisions:
         assert f"uv run python -m pipeline.clean {deciding.as_posix()}" in section
         assert "J2 was decided by the AI with low confidence" in report
 
-        handoff = json.loads((deciding / clean.HANDOFF_FILE).read_text(encoding="utf-8"))
+        handoff = json.loads(run_file(deciding, clean.HANDOFF_FILE).read_text(encoding="utf-8"))
         ai_flags = [f for f in handoff["flags"] if f["code"] == "ai_decision"]
         assert {f["details"]["confidence"] for f in ai_flags} == {"high", "low"}
 
@@ -381,5 +382,5 @@ class TestAIDecisions:
         section = ai_section(report)
         assert "### J1" not in section and "### J2" in section
         assert "**J1** decided by you: Keep 999" in report
-        handoff = json.loads((deciding / clean.HANDOFF_FILE).read_text(encoding="utf-8"))
+        handoff = json.loads(run_file(deciding, clean.HANDOFF_FILE).read_text(encoding="utf-8"))
         assert any(f["code"] == "user_decision" for f in handoff["flags"])

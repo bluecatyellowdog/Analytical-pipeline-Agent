@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from pipeline.agents.llm import LLMClient, LLMResponse, Message
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.manifest import ModelInfo, RunManifest
+from pipeline.layout import MANIFEST, run_file, upgrade_layout
 
 MAX_RETRIES = 2
 
@@ -134,8 +135,10 @@ def record_in_manifest(
 
 
 def load_manifest(run_dir: Path) -> RunManifest:
-    return RunManifest.model_validate_json((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    """The run's manifest. A folder from before the current layout is moved into it first."""
+    upgrade_layout(run_dir)
+    return RunManifest.model_validate_json(run_file(run_dir, MANIFEST).read_text(encoding="utf-8"))
 
 
 def save_manifest(run_dir: Path, manifest: RunManifest) -> None:
-    (run_dir / "manifest.json").write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+    run_file(run_dir, MANIFEST).write_text(manifest.model_dump_json(indent=2), encoding="utf-8")

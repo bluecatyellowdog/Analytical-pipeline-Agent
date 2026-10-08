@@ -17,6 +17,7 @@ import yaml
 from benchmark.datasets.synthetic import make_loans
 from benchmark.run_benchmark import RunInfo, build_case, run_benchmark
 from benchmark.scenarios import SCENARIOS
+from pipeline.layout import ensure_layout, run_file
 
 pytestmark = pytest.mark.e2e
 
@@ -25,7 +26,7 @@ def perfect_pipeline(data):
     """A stand-in that 'cleans' perfectly: it writes the clean data back out."""
 
     def run(source, brief, out):
-        out.mkdir(parents=True)
+        ensure_layout(out)
         frame = data.frame.copy()
         frame.insert(0, "_source_line", range(2, len(frame) + 2))
         key = json.loads((source.parent / "answer_key.json").read_text(encoding="utf-8"))
@@ -33,9 +34,9 @@ def perfect_pipeline(data):
             if injection["expected"] == "missing":
                 for row in injection["rows"]:
                     frame.loc[frame["_source_line"] == row + 2, injection["column"]] = None
-        path = (out / "clean_data.parquet").as_posix()
+        path = run_file(out, "clean_data.parquet").as_posix()
         duckdb.from_df(frame).write_parquet(path)
-        (out / "diagnosis.json").write_text(
+        run_file(out, "diagnosis.json").write_text(
             json.dumps({"summary": "s", "issues": [], "judgment_calls": [], "columns": []}),
             encoding="utf-8",
         )

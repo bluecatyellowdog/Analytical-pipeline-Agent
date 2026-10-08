@@ -16,6 +16,7 @@ import pytest
 from pipeline import clean
 from pipeline.agents import analysis, planner
 from pipeline.agents.llm import FakeLLM
+from pipeline.layout import REPORT_PDF, run_file
 from pipeline.run import run_all, summarise
 from tests.unit.test_analysis_agent import FIXTURE_ANALYSIS_REPLIES
 from tests.unit.test_coder import DIAGNOSIS, plan_json
@@ -74,8 +75,8 @@ def test_one_command_runs_all_three_steps(workspace) -> None:
         analysis.ARTIFACTS_JSON,
         analysis.GATE_4_FILE,
     ):
-        assert (folder / name).exists(), name
-    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+        assert run_file(folder, name).exists(), name
+    manifest = json.loads(run_file(folder, "manifest.json").read_text(encoding="utf-8"))
     assert manifest["stage_status"] == {
         "ingestion": "done",
         "diagnosis": "done",
@@ -87,13 +88,13 @@ def test_one_command_runs_all_three_steps(workspace) -> None:
     assert summary.planning.plan.approved_by == "auto"
 
 
-def test_the_index_links_the_cleaning_report(workspace) -> None:
+def test_the_index_links_the_report(workspace) -> None:
     llm = FakeLLM(
         [DIAGNOSIS.model_dump_json(), plan_json(), FIXTURE_PLAN_REPLY, *FIXTURE_ANALYSIS_REPLIES]
     )
     summary = run_all("loans.csv", "brief.yaml", llm, review_client=FakeLLM([VERDICT]))
     index = (workspace / "runs" / "index.md").read_text(encoding="utf-8")
-    assert f"{summary.run_dir.name}/{clean.CLEANING_REPORT}" in index
+    assert f"{summary.run_dir.name}/{REPORT_PDF}" in index
 
 
 def test_a_gate_1_block_stops_before_any_llm_call(workspace) -> None:
@@ -102,7 +103,7 @@ def test_a_gate_1_block_stops_before_any_llm_call(workspace) -> None:
 
     assert summary.stopped_at == "ingest"
     assert llm.calls == []
-    assert not (summary.run_dir / "diagnosis.json").exists()
+    assert not run_file(summary.run_dir, "diagnosis.json").exists()
     assert "Gate 1: BLOCK" in summarise(summary)
 
 
@@ -122,8 +123,8 @@ def test_the_summary_says_where_to_look(workspace) -> None:
         "5. Analyse",
         "Gate 4: PASS",
         "Clean data:",
-        "Plan:",
-        "Findings:",
+        "To change the cleaning, edit",
+        "To change the analysis, edit",
     ):
         assert expected in text, expected
-    assert str((summary.run_dir / clean.CLEANING_REPORT).resolve()) in text
+    assert f"Start here: {run_file(summary.run_dir, REPORT_PDF).resolve()}" in text

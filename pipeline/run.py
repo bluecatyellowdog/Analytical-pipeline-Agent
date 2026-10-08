@@ -26,10 +26,10 @@ from pipeline.agents.coder import CoderError
 from pipeline.agents.decisions import DecisionsError
 from pipeline.agents.llm import LLMClient, LLMConfigError, connect
 from pipeline.contracts.context_brief import load_context_brief
-from pipeline.ingest import INDEX_FILENAME, IngestionResult, default_out_dir, ingest, update_index
+from pipeline.ingest import IngestionResult, default_out_dir, ingest, update_index
 from pipeline.ingestion.raw import RawStore
-from pipeline.report import REPORT_FILENAME
-from pipeline.report_pdf import PDF_FILENAME, build_pdf
+from pipeline.layout import REPORT_PDF, run_file
+from pipeline.reports import build_reports
 from pipeline.tools.context import AnalysisInputError
 
 
@@ -58,10 +58,10 @@ def run_all(
     client: LLMClient,
     **options: Any,
 ) -> RunSummary:
-    """Every step on one file, into one run folder, then the PDF report."""
+    """Every step on one file, into one run folder, then the reports."""
     summary = _run_steps(source, brief_path, client, **options)
     try:
-        build_pdf(summary.run_dir)
+        build_reports(summary.run_dir)
     except Exception as error:  # noqa: BLE001 - a failed PDF must not lose a finished run
         summary.pdf_error = f"{type(error).__name__}: {error}"
     return summary
@@ -93,7 +93,7 @@ def _run_steps(
     summary = RunSummary(run_dir=run_dir, ingestion=ingestion)
     if ingestion.blocked:
         summary.stopped_at = "ingest"
-        summary.reason = f"Gate 1 blocked the file; {REPORT_FILENAME} says why."
+        summary.reason = f"Gate 1 blocked the file; {REPORT_PDF} says why."
         return summary
 
     try:
@@ -122,8 +122,6 @@ def _run_steps(
         summary.reason = str(error)
         return summary
 
-    if out is None:
-        _link_in_index(run_dir, "cleaning", clean.CLEANING_REPORT)
     if summary.cleaning.result.blocked or not planning:
         return summary
 
@@ -153,25 +151,18 @@ def summarise(summary: RunSummary) -> str:
     """What happened at each step, what it cost, and which file to open."""
     folder = summary.run_dir
     load = summary.ingestion.load_result
-    pdf = folder / PDF_FILENAME
+    report = run_file(folder, REPORT_PDF)
     lines = [
-        f"PDF report: {pdf.resolve()}"
-        if pdf.exists()
-        else f"PDF report failed: {summary.pdf_error}",
+        f"Start here: {report.resolve()}"
+        if report.exists()
+        else f"The report could not be written: {summary.pdf_error}",
         f"Run folder: {folder.resolve()}",
         "",
         f"1. Ingest    {load.n_loaded:,} rows loaded, {load.n_rejected:,} rejected. "
         f"Gate 1: {summary.ingestion.gate.outcome.upper()}",
     ]
     if summary.stopped_at == "ingest":
-        return "\n".join(
-            [
-                *lines,
-                "",
-                f"Stopped: {summary.reason}",
-                f"Report: {(folder / REPORT_FILENAME).resolve()}",
-            ]
-        )
+        return "\n".join([*lines, "", f"Stopped: {summary.reason}"])
 
     if summary.diagnosis is not None:
         diagnosis = summary.diagnosis.diagnosis
@@ -224,31 +215,17 @@ def summarise(summary: RunSummary) -> str:
     if summary.stopped_at in ("planning", "analysis"):
         lines += ["", f"Stopped: {summary.reason}"]
 
-    lines += ["", f"Report:     {(folder / clean.CLEANING_REPORT).resolve()}"]
+    lines.append("")
     if result.blocked:
         lines.append("No clean data was written; the report says why.")
     else:
-        lines.append(f"Clean data: {(folder / clean.CLEAN_CSV).resolve()}")
+        lines.append(f"Clean data: {run_file(folder, clean.CLEAN_CSV).resolve()}")
+    lines.append(f"To change the cleaning, edit {run_file(folder, 'decisions.yaml').resolve()}")
     if summary.planning is not None:
-        lines.append(f"Plan:       {(folder / planner.PLAN_YAML).resolve()} (edit to change it)")
-    if summary.analysis is not None:
-        lines.append(f"Findings:   {(folder / analysis.ANALYSIS_REPORT).resolve()}")
+        lines.append(
+            f"To change the analysis, edit {run_file(folder, planner.PLAN_YAML).resolve()}"
+        )
     return "\n".join(lines)
-
-
-def _link_in_index(run_dir: Path, label: str, filename: str) -> None:
-    """Add a link to this run's row in runs/index.md, so the newest report is one click away."""
-    index = run_dir.parent / INDEX_FILENAME
-    if not index.exists():
-        return
-    marker = f"[{run_dir.name}]("
-    lines = index.read_text(encoding="utf-8").splitlines(keepends=True)
-    for number, line in enumerate(lines):
-        if marker in line and line.rstrip().endswith("|"):
-            body = line.rstrip()[:-1].rstrip()
-            lines[number] = f"{body} · [{label}]({run_dir.name}/{filename}) |\n"
-            break
-    index.write_text("".join(lines), encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -40,6 +40,7 @@ from pipeline.agents.llm import LLMClient, LLMConfigError, Message, connect
 from pipeline.checks.schema import type_fits
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.diagnosis import Diagnosis
+from pipeline.layout import run_file, upgrade_layout
 from pipeline.ops import REGISTRY, op_names
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "analyst.md"
@@ -318,24 +319,27 @@ def render_markdown(diagnosis: Diagnosis, result: AnalystResult | None = None) -
 
 def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) -> AnalystResult:
     """Diagnose an ingestion run folder and write the results next to it."""
-    profile_llm = json.loads((run_dir / "profile_llm.json").read_text(encoding="utf-8"))
+    upgrade_layout(run_dir)
+    profile_llm = json.loads(run_file(run_dir, "profile_llm.json").read_text(encoding="utf-8"))
     manifest = load_manifest(run_dir)
 
     try:
         result = diagnose(profile_llm, manifest.context_brief, client)
     except AnalystError as error:
-        write_attempt_log(run_dir / ANALYST_LOG, error.attempts, prompt_version())
+        write_attempt_log(run_file(run_dir, ANALYST_LOG), error.attempts, prompt_version())
         record_in_manifest(manifest, "analyst", provider, error.attempts, prompt_version())
         manifest.stage_status["diagnosis"] = "blocked"
         save_manifest(run_dir, manifest)
         raise
 
-    (run_dir / DIAGNOSIS_JSON).write_text(
+    run_file(run_dir, DIAGNOSIS_JSON).write_text(
         result.diagnosis.model_dump_json(indent=2), encoding="utf-8"
     )
-    (run_dir / DIAGNOSIS_MD).write_text(render_markdown(result.diagnosis, result), encoding="utf-8")
-    write_template(run_dir / DECISIONS_FILE, result.diagnosis)
-    write_attempt_log(run_dir / ANALYST_LOG, result.attempts, result.prompt_version)
+    run_file(run_dir, DIAGNOSIS_MD).write_text(
+        render_markdown(result.diagnosis, result), encoding="utf-8"
+    )
+    write_template(run_file(run_dir, DECISIONS_FILE), result.diagnosis)
+    write_attempt_log(run_file(run_dir, ANALYST_LOG), result.attempts, result.prompt_version)
 
     record_in_manifest(manifest, "analyst", provider, result.attempts, result.prompt_version)
     manifest.stage_status["diagnosis"] = "done"
@@ -352,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     run_dir = Path(args.run_dir)
-    if not (run_dir / "profile_llm.json").exists():
+    if not run_file(run_dir, "profile_llm.json").exists():
         print(f"{run_dir} is not an ingestion run folder (no profile_llm.json).")
         return 1
     try:
@@ -365,23 +369,23 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = run_on_folder(run_dir, client, client.config.public())
     except AnalystError as error:
-        print(f"\n{error}\nEvery attempt is logged in {(run_dir / ANALYST_LOG).resolve()}")
+        print(f"\n{error}\nEvery attempt is logged in {run_file(run_dir, ANALYST_LOG).resolve()}")
         return 1
 
     print()
     print(render_markdown(result.diagnosis, result))
-    print(f"Wrote {(run_dir / DIAGNOSIS_MD).resolve()}")
+    print(f"Wrote {run_file(run_dir, DIAGNOSIS_MD).resolve()}")
     calls = result.diagnosis.judgment_calls
     if calls and any(call.ai_decision for call in calls):
         print(
             f"The AI decided the {len(calls)} judgment call(s) from your brief. Check or change "
-            f"them in {(run_dir / DECISIONS_FILE).resolve()}, then clean the data:\n"
+            f"them in {run_file(run_dir, DECISIONS_FILE).resolve()}, then clean the data:\n"
             f"  uv run python -m pipeline.clean {run_dir.as_posix()}"
         )
     elif calls:
         print(
             f"Decide the {len(calls)} judgment call(s) in "
-            f"{(run_dir / DECISIONS_FILE).resolve()}, then clean the data:\n"
+            f"{run_file(run_dir, DECISIONS_FILE).resolve()}, then clean the data:\n"
             f"  uv run python -m pipeline.clean {run_dir.as_posix()}"
         )
     return 0

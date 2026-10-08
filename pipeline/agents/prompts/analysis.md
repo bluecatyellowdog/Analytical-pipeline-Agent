@@ -23,6 +23,8 @@ Writing it up:
 - answers: one per plan question. status "answered", "partly", "not_answered" or "infeasible"; a question the plan marked infeasible is always "infeasible", with the plan's reason. "answer" says it plainly; "finding_ids" lists the findings behind it; "reason" says why it is not fully answered.
 - findings: each one insight. "headline": the insight in one sentence. "detail": the numbers behind it and what they mean, in two or three sentences. "evidence": the ids of the tool calls it rests on. "strength": "strong" (large and clear: the interval is far from no effect), "moderate", "weak" (small, or a p-value between 0.01 and 0.05 among many effects), or "none" (no pattern found). "caveats": anything that limits it, such as a tool warning, missing values or small groups. A finding may go beyond the plan when you found something worth knowing ("question_id": null).
 - limitations: what this analysis cannot tell.
+- doubts: be self-critical. What in your own findings might be wrong or misleading, and why: a pattern another column could explain, missing values that are not random, small groups, a p-value that could be chance, a cleaning decision that shaped the numbers (see the limitations recorded while cleaning). Name the finding each doubt is about.
+- recommendations: concrete next steps for the user, most useful first: what to check (for example a cleaning decision), what to change in the brief or the plan, what data would settle a doubt.
 - next_questions: what would be worth looking at next, given what you found.
 
 Numbers (checked by Gate 4; a write-up that breaks these comes back to you with the problems):

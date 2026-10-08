@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from pipeline.contracts.artifact import Artifact, ArtifactCatalog, AuditRef
 from pipeline.contracts.common import Flag, new_id
+from pipeline.layout import CHARTS
 
 MIN_GROUP_N = 10
 """Smallest group shown on its own, to the agent or in a report."""
@@ -262,7 +263,7 @@ def _artifact(
     if result.figure is not None:
         from pipeline.tools.charts import save
 
-        relative = Path("analysis") / "charts" / f"{artifact.artifact_id}.png"
+        relative = Path(CHARTS) / f"{artifact.artifact_id}.png"
         save(result.figure, ctx.out_dir / relative)
         artifact.spec = {"chart_file": relative.as_posix()}
     ctx.catalog.add(artifact)

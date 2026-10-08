@@ -57,6 +57,7 @@ from pipeline.contracts.artifact import Artifact, ArtifactCatalog, AuditRef
 from pipeline.contracts.audit import GateResult
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.plan import AnalysisPlan
+from pipeline.layout import CHARTS, run_file, upgrade_layout
 from pipeline.tools import ToolError, describe_tools, run_tool
 from pipeline.tools.context import AnalysisInputError, describe_data, load_context, read_handoff
 from pipeline.tools.registry import AnalysisContext
@@ -67,9 +68,9 @@ ARTIFACTS_JSON = "artifacts.json"
 ANALYSIS_LOG = "analysis_log.json"
 GATE_4_FILE = "gate_4.json"
 ANALYSIS_REPORT = "analysis_report.md"
-CHARTS_DIR = "analysis"
 OUTPUTS = (ANALYSIS_JSON, ARTIFACTS_JSON, ANALYSIS_LOG, GATE_4_FILE, ANALYSIS_REPORT)
 MAX_ROUNDS = 3
+MAX_LIMITATIONS = 15
 MAX_CALLS = 20
 MOVE: TypeAdapter = TypeAdapter(AgentMove)
 
@@ -127,12 +128,20 @@ def plan_text(plan: AnalysisPlan) -> str:
     return yaml.safe_dump(body, allow_unicode=True, sort_keys=False, width=100)
 
 
-def build_messages(ctx: AnalysisContext, plan: AnalysisPlan, brief: ContextBrief) -> list[Message]:
-    """The whole opening prompt. Built from the brief, the plan and aggregates of the data."""
+def build_messages(
+    ctx: AnalysisContext,
+    plan: AnalysisPlan,
+    brief: ContextBrief,
+    limitations: list[str] | None = None,
+) -> list[Message]:
+    """The whole opening prompt. Built from the brief, the plan, aggregates of the data and
+    the limitations recorded while cleaning."""
+    noted = "\n".join(f"- {item}" for item in (limitations or [])[:MAX_LIMITATIONS])
     user = (
         f"Context brief:\n{brief_block(brief)}\n"
         f"The approved plan:\n{plan_text(plan)}\n"
         f"{fenced('data', describe_data(ctx))}\n\n"
+        f"Limitations recorded while cleaning:\n{fenced('limitations', noted or 'None.')}\n\n"
         "Start with a round of tool calls for the plan's questions."
     )
     return [{"role": "system", "content": system_prompt()}, {"role": "user", "content": user}]
@@ -237,9 +246,10 @@ def analyse(
     max_rounds: int = MAX_ROUNDS,
     max_calls: int = MAX_CALLS,
     max_retries: int = MAX_RETRIES,
+    limitations: list[str] | None = None,
 ) -> AnalysisResult:
     """Rounds of tool calls, then a write-up that must pass Gate 4."""
-    messages = build_messages(ctx, plan, brief)
+    messages = build_messages(ctx, plan, brief, limitations)
     context = f"{brief_block(brief)}\n{plan_text(plan)}"
     attempts: list[Attempt] = []
     calls: list[CallRecord] = []
@@ -340,6 +350,7 @@ def _outcome(
 
 def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) -> AnalysisResult:
     """Analyse a planned run folder and write the results next to it."""
+    upgrade_layout(run_dir)
     plan = plan_in_force(run_dir)
     if plan is None:
         raise AnalysisInputError(
@@ -347,10 +358,13 @@ def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) ->
         )
     manifest = load_manifest(run_dir)
     brief = manifest.context_brief
-    ctx = load_context(run_dir, handoff=read_handoff(run_dir))
+    handoff = read_handoff(run_dir)
+    ctx = load_context(run_dir, handoff=handoff)
     if plan.approved_by == "user":
         gate_3 = gate_3_plan(plan, ctx, brief, edited_by_user=True)
-        (run_dir / GATE_3_FILE).write_text(gate_3.model_dump_json(indent=2), encoding="utf-8")
+        run_file(run_dir, GATE_3_FILE).write_text(
+            gate_3.model_dump_json(indent=2), encoding="utf-8"
+        )
         if gate_3.blocked:
             raise AnalysisInputError(
                 "your edited analysis_plan.yaml cannot run (Gate 3): "
@@ -360,24 +374,30 @@ def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) ->
     ctx.excluded |= plan.excluded_columns
 
     for name in OUTPUTS:
-        (run_dir / name).unlink(missing_ok=True)
-    shutil.rmtree(run_dir / CHARTS_DIR, ignore_errors=True)
+        run_file(run_dir, name).unlink(missing_ok=True)
+    shutil.rmtree(run_dir / CHARTS, ignore_errors=True)
 
     try:
-        result = analyse(ctx, plan, brief, client)
+        result = analyse(
+            ctx,
+            plan,
+            brief,
+            client,
+            limitations=list(dict.fromkeys(f.message for f in handoff.flags)),
+        )
     except AnalysisError as error:
         _write_log(run_dir, error.attempts, error.calls)
         if error.gate is not None:
-            (run_dir / GATE_4_FILE).write_text(error.gate.model_dump_json(indent=2), "utf-8")
+            run_file(run_dir, GATE_4_FILE).write_text(error.gate.model_dump_json(indent=2), "utf-8")
         record_in_manifest(manifest, "analysis", provider, error.attempts, prompt_version())
         manifest.stage_status["analysis"] = "blocked"
         save_manifest(run_dir, manifest)
         raise
 
-    (run_dir / ANALYSIS_JSON).write_text(result.outcome.model_dump_json(indent=2), "utf-8")
-    (run_dir / ARTIFACTS_JSON).write_text(result.catalog.model_dump_json(indent=2), "utf-8")
-    (run_dir / GATE_4_FILE).write_text(result.gate.model_dump_json(indent=2), "utf-8")
-    (run_dir / ANALYSIS_REPORT).write_text(render_markdown(result), encoding="utf-8")
+    run_file(run_dir, ANALYSIS_JSON).write_text(result.outcome.model_dump_json(indent=2), "utf-8")
+    run_file(run_dir, ARTIFACTS_JSON).write_text(result.catalog.model_dump_json(indent=2), "utf-8")
+    run_file(run_dir, GATE_4_FILE).write_text(result.gate.model_dump_json(indent=2), "utf-8")
+    run_file(run_dir, ANALYSIS_REPORT).write_text(render_markdown(result), encoding="utf-8")
     _write_log(run_dir, result.attempts, result.outcome.calls)
     record_in_manifest(manifest, "analysis", provider, result.attempts, result.prompt_version)
     manifest.stage_status["analysis"] = "done"
@@ -391,7 +411,9 @@ def _write_log(run_dir: Path, attempts: list[Attempt], calls: list[CallRecord]) 
         "attempts": [asdict(a) for a in attempts],
         "calls": [c.model_dump(mode="json") for c in calls],
     }
-    (run_dir / ANALYSIS_LOG).write_text(json.dumps(log, indent=2, ensure_ascii=False), "utf-8")
+    run_file(run_dir, ANALYSIS_LOG).write_text(
+        json.dumps(log, indent=2, ensure_ascii=False), "utf-8"
+    )
 
 
 # -- reading it ---------------------------------------------------------------------
@@ -473,7 +495,7 @@ def _finding_lines(finding, outcome: AnalysisOutcome, catalog: ArtifactCatalog) 
         for artifact_id in call.artifact_ids if call else []:
             artifact = catalog.get(artifact_id)
             if artifact is not None and artifact.spec.get("chart_file"):
-                lines.append(f"  - ![{artifact.title}]({artifact.spec['chart_file']})")
+                lines.append(f"  - ![{artifact.title}](../{artifact.spec['chart_file']})")
     return lines
 
 

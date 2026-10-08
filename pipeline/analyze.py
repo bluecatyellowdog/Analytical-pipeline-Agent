@@ -17,7 +17,8 @@ from pathlib import Path
 
 from pipeline.agents import analysis, planner
 from pipeline.agents.llm import LLMClient, LLMConfigError, connect
-from pipeline.report_pdf import PDF_FILENAME, build_pdf
+from pipeline.layout import is_run_folder, upgrade_layout
+from pipeline.reports import build_reports
 from pipeline.tools.context import AnalysisInputError
 
 
@@ -28,6 +29,7 @@ class AnalyzeSummary:
     analysis: analysis.AnalysisResult | None = None
     stopped: str | None = None
     """Why the analysis could not run, when it could not."""
+    report: Path | None = None
     pdf_error: str | None = None
 
     @property
@@ -37,8 +39,10 @@ class AnalyzeSummary:
 
 
 def analyze_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) -> AnalyzeSummary:
-    """Plan if needed, analyse, and rebuild the PDF; a failed step is reported, not raised."""
+    """Plan if needed, analyse, and rebuild the reports; a failed step is reported, not raised."""
+    upgrade_layout(run_dir)
     summary = AnalyzeSummary(run_dir=run_dir)
+    report: Path | None = None
     try:
         if planner.plan_in_force(run_dir) is None:
             summary.planning = planner.run_on_folder(run_dir, client, provider)
@@ -50,14 +54,14 @@ def analyze_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) -
     except analysis.AnalysisError as error:
         summary.stopped = f"{error} Every attempt is logged in {analysis.ANALYSIS_LOG}."
     try:
-        build_pdf(run_dir)
+        report = build_reports(run_dir)
     except Exception as error:  # noqa: BLE001 - a failed PDF must not lose a finished analysis
         summary.pdf_error = f"{type(error).__name__}: {error}"
+    summary.report = report
     return summary
 
 
 def summarise(summary: AnalyzeSummary) -> str:
-    folder = summary.run_dir
     lines = []
     if summary.planning is not None:
         lines.append(planner.render_text(summary.planning))
@@ -67,15 +71,11 @@ def summarise(summary: AnalyzeSummary) -> str:
         lines.append(f"LLM cost: ${summary.cost_usd:.2f}")
     if summary.stopped:
         lines.append(f"Stopped: {summary.stopped}")
-    pdf = folder / PDF_FILENAME
-    lines += [
-        "",
-        f"PDF report: {pdf.resolve()}"
-        if not summary.pdf_error
-        else f"PDF failed: {summary.pdf_error}",
-    ]
-    if summary.analysis is not None:
-        lines.append(f"Findings:   {(folder / analysis.ANALYSIS_REPORT).resolve()}")
+    lines.append("")
+    if summary.report is not None:
+        lines.append(f"Start here: {summary.report.resolve()}")
+    else:
+        lines.append(f"The report could not be written: {summary.pdf_error}")
     return "\n".join(lines)
 
 
@@ -87,8 +87,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("run_dir", help="A cleaned run folder, e.g. runs/loans_...")
     args = parser.parse_args(argv)
     run_dir = Path(args.run_dir)
-    if not (run_dir / "manifest.json").exists():
-        print(f"{run_dir} is not a run folder (no manifest.json).")
+    if not is_run_folder(run_dir):
+        print(f"{run_dir} is not a run folder (no logs/manifest.json).")
         return 1
     try:
         client = connect()

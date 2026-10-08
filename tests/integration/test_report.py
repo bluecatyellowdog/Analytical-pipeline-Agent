@@ -9,6 +9,7 @@ import pytest
 from pipeline.contracts.ingestion import RejectedLine
 from pipeline.ingest import ingest, main
 from pipeline.ingestion.raw import RawStore
+from pipeline.layout import run_file
 from pipeline.report import MAX_REJECTS_IN_REPORT, _cell, write_rejected_csv
 
 pytestmark = pytest.mark.integration
@@ -93,13 +94,13 @@ class TestReport:
         assert "...and 10 more in `rejected_lines.csv`." in result.report
 
         out = result.write(tmp_path / "out")
-        assert len(read_rejects(out / "rejected_lines.csv")) == MAX_REJECTS_IN_REPORT + 10
+        assert len(read_rejects(run_file(out, "rejected_lines.csv"))) == MAX_REJECTS_IN_REPORT + 10
 
 
 class TestRejectedFile:
     def test_saves_every_rejected_line_in_full(self, fixtures_dir, store, tmp_path) -> None:
         out = ingest(fixtures_dir / "too_many_fields.csv", store=store).write(tmp_path)
-        rows = read_rejects(out / "rejected_lines.csv")
+        rows = read_rejects(run_file(out, "rejected_lines.csv"))
         assert rows == [
             {"source_line": "3", "reason": "4 fields, expected 3", "raw": "2,Beta,200,EXTRA\n"},
             {"source_line": "5", "reason": "2 fields, expected 3", "raw": "4,Delta\n"},
@@ -109,13 +110,13 @@ class TestRejectedFile:
         """The reason the file exists: find the bad line in the source."""
         source = (fixtures_dir / "too_many_fields.csv").read_text(encoding="utf-8").splitlines()
         out = ingest(fixtures_dir / "too_many_fields.csv", store=store).write(tmp_path)
-        for row in read_rejects(out / "rejected_lines.csv"):
+        for row in read_rejects(run_file(out, "rejected_lines.csv")):
             assert source[int(row["source_line"]) - 1] == row["raw"].rstrip("\n")
 
     def test_is_written_even_when_nothing_was_rejected(self, fixtures_dir, store, tmp_path) -> None:
         out = ingest(fixtures_dir / "danish_semicolon.csv", store=store).write(tmp_path)
-        assert read_rejects(out / "rejected_lines.csv") == []
-        header = (out / "rejected_lines.csv").read_text(encoding="utf-8-sig").splitlines()[0]
+        assert read_rejects(run_file(out, "rejected_lines.csv")) == []
+        header = run_file(out, "rejected_lines.csv").read_text(encoding="utf-8-sig").splitlines()[0]
         assert header == "source_line,reason,raw"
 
     def test_keeps_danish_characters_and_a_bom_for_excel(self, tmp_path) -> None:
@@ -156,7 +157,7 @@ class TestCli:
         output = capsys.readouterr().out
         assert code == 1
         assert "Read 3 of 5 data rows; 2 rejected (40.00%)." in output
-        assert "ingestion_report.md" in output
+        assert "REPORT.pdf" in output
         assert "rejected_lines.csv" in output
 
     def test_does_not_point_at_a_rejects_file_when_there_were_none(

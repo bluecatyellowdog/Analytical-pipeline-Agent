@@ -48,6 +48,7 @@ from pipeline.contracts.audit import GateResult
 from pipeline.contracts.common import utcnow
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.plan import AnalysisPlan
+from pipeline.layout import run_file, upgrade_layout
 from pipeline.tools import describe_tools
 from pipeline.tools.context import (
     AnalysisInputError,
@@ -218,7 +219,7 @@ def plan_yaml(plan: AnalysisPlan) -> str:
 
 def user_edited(run_dir: Path) -> bool:
     """Whether analysis_plan.yaml differs from the plan the AI wrote."""
-    edited, original = run_dir / PLAN_YAML, run_dir / PLAN_AI_JSON
+    edited, original = run_file(run_dir, PLAN_YAML), run_file(run_dir, PLAN_AI_JSON)
     if not edited.exists() or not original.exists():
         return edited.exists()
     ai = AnalysisPlan.model_validate_json(original.read_text(encoding="utf-8"))
@@ -229,7 +230,7 @@ def user_edited(run_dir: Path) -> bool:
 def plan_in_force(run_dir: Path) -> AnalysisPlan | None:
     """The plan the analysis runs: your edit of analysis_plan.yaml when there is one, else
     the AI's. An edited plan is approved by the user, with every change listed."""
-    ai_path, yaml_path = run_dir / PLAN_AI_JSON, run_dir / PLAN_YAML
+    ai_path, yaml_path = run_file(run_dir, PLAN_AI_JSON), run_file(run_dir, PLAN_YAML)
     ai = (
         AnalysisPlan.model_validate_json(ai_path.read_text(encoding="utf-8"))
         if ai_path.exists()
@@ -293,6 +294,7 @@ def _limitations(flags: list[Any]) -> list[str]:
 
 def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) -> PlannerResult:
     """Plan the analysis of a cleaned run folder and write the plan next to it."""
+    upgrade_layout(run_dir)
     if user_edited(run_dir):
         raise AnalysisInputError(
             f"{PLAN_YAML} has your edits, so no new plan is written over it. Delete it to have "
@@ -307,18 +309,22 @@ def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) ->
             ctx, manifest.context_brief, client, limitations=_limitations(handoff.flags)
         )
     except PlannerError as error:
-        write_attempt_log(run_dir / PLANNER_LOG, error.attempts, prompt_version())
+        write_attempt_log(run_file(run_dir, PLANNER_LOG), error.attempts, prompt_version())
         if error.gate is not None:
-            (run_dir / GATE_3_FILE).write_text(error.gate.model_dump_json(indent=2), "utf-8")
+            run_file(run_dir, GATE_3_FILE).write_text(error.gate.model_dump_json(indent=2), "utf-8")
         record_in_manifest(manifest, "planner", provider, error.attempts, prompt_version())
         manifest.stage_status["planning"] = "blocked"
         save_manifest(run_dir, manifest)
         raise
 
-    (run_dir / PLAN_AI_JSON).write_text(result.plan.model_dump_json(indent=2), encoding="utf-8")
-    (run_dir / PLAN_YAML).write_text(plan_yaml(result.plan), encoding="utf-8")
-    (run_dir / GATE_3_FILE).write_text(result.gate.model_dump_json(indent=2), encoding="utf-8")
-    write_attempt_log(run_dir / PLANNER_LOG, result.attempts, result.prompt_version)
+    run_file(run_dir, PLAN_AI_JSON).write_text(
+        result.plan.model_dump_json(indent=2), encoding="utf-8"
+    )
+    run_file(run_dir, PLAN_YAML).write_text(plan_yaml(result.plan), encoding="utf-8")
+    run_file(run_dir, GATE_3_FILE).write_text(
+        result.gate.model_dump_json(indent=2), encoding="utf-8"
+    )
+    write_attempt_log(run_file(run_dir, PLANNER_LOG), result.attempts, result.prompt_version)
     record_in_manifest(manifest, "planner", provider, result.attempts, result.prompt_version)
     manifest.stage_status["planning"] = "done"
     save_manifest(run_dir, manifest)
@@ -365,11 +371,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Cannot plan {run_dir}: {error}")
         return 1
     except PlannerError as error:
-        print(f"\n{error}\nEvery attempt is logged in {(run_dir / PLANNER_LOG).resolve()}")
+        print(f"\n{error}\nEvery attempt is logged in {run_file(run_dir, PLANNER_LOG).resolve()}")
         return 1
     print()
     print(render_text(result))
-    print(f"\nWrote {(run_dir / PLAN_YAML).resolve()}")
+    print(f"\nWrote {run_file(run_dir, PLAN_YAML).resolve()}")
     return 0
 
 

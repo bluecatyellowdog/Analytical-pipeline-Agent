@@ -26,6 +26,7 @@ from pipeline.agents.planner import (
 )
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.handoff import ColumnSchema
+from pipeline.layout import run_file
 from pipeline.tools.context import column_kind, describe_data
 from tests.unit.test_analysis_tools import loans_context
 from tests.unit.test_plan_gate import GOOD_QUESTIONS, question
@@ -80,6 +81,12 @@ FIXTURE_PLAN_REPLY = json.dumps(
     }
 )
 """A plan that passes Gate 3 on the cleaned danish_semicolon fixture, for the mocked runs."""
+
+
+def ensure(path):
+    """A run-folder path whose folder exists."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 @pytest.fixture
@@ -186,12 +193,14 @@ class TestThePlanOnDisk:
 
     def test_an_edited_plan_is_recognised(self, ctx, tmp_path) -> None:
         plan = plan_analysis(ctx, BRIEF, FakeLLM([reply()])).plan
-        (tmp_path / PLAN_AI_JSON).write_text(plan.model_dump_json(), encoding="utf-8")
-        (tmp_path / PLAN_YAML).write_text(plan_yaml(plan), encoding="utf-8")
+        ensure(run_file(tmp_path, PLAN_AI_JSON)).write_text(
+            plan.model_dump_json(), encoding="utf-8"
+        )
+        ensure(run_file(tmp_path, PLAN_YAML)).write_text(plan_yaml(plan), encoding="utf-8")
         assert not user_edited(tmp_path)
-        text = (tmp_path / PLAN_YAML).read_text(encoding="utf-8")
+        text = ensure(run_file(tmp_path, PLAN_YAML)).read_text(encoding="utf-8")
         edited = text.replace("Question q1", "How does default vary by region?")
-        (tmp_path / PLAN_YAML).write_text(edited, encoding="utf-8")
+        ensure(run_file(tmp_path, PLAN_YAML)).write_text(edited, encoding="utf-8")
         assert user_edited(tmp_path)
 
 
