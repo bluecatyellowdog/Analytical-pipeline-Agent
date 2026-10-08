@@ -320,7 +320,7 @@ def _review(run: Run) -> list:
         P("5. The review", "h1"),
         P(
             "A second AI checked whether the cleaning was right, using its own counting queries "
-            "on the data (never rows, and personal values only as their shape).",
+            "on the data (never rows).",
             "note",
         ),
     ]
@@ -531,7 +531,7 @@ def _audit(run: Run) -> list:
         P(
             "Every number in this report comes from the run's logs. Text marked 'AI-written' was "
             "written by a language model and is shown as it wrote it. The original data was never "
-            "modified, and no AI saw a row or a personal value.",
+            "modified, and no AI saw a row.",
             "note",
         ),
     ]

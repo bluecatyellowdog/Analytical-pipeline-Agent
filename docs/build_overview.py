@@ -141,7 +141,7 @@ def flowchart() -> Drawing:
         (
             "ingest",
             "1. Ingest",
-            "load as text, profile, mask personal data",
+            "load as text, profile, check the brief",
             CODE,
             CODE_EDGE,
             "CODE",
@@ -292,7 +292,7 @@ def flowchart() -> Drawing:
         d,
         4,
         30,
-        "The AI never sees rows or personal data: only masked summaries and totals.",
+        "The AI never sees rows: only summaries and totals.",
         size=7.5,
         colour=AI_EDGE,
     )
@@ -406,7 +406,7 @@ story = [
         "checks in plain code, decides whether the result may go on."
     ),
     p(
-        "Three rules hold everywhere: the AI never sees rows or personal data, only masked summaries "
+        "Three rules hold everywhere: the AI never sees rows, only summaries "
         "and totals; every change and every number is logged, and the original file is never "
         "modified; and nothing is decided silently - every choice is in the report with its reasons, "
         "and you can change it and run again."
@@ -434,7 +434,7 @@ story = [
         "Read the file exactly as it is, and describe it.",
         "Your data file (CSV, Excel, Parquet, JSON) and the brief.",
         "Loads every value as text, so nothing is silently converted. Profiles each column "
-        "(type, missing values, odd values), detects personal data and masks it, and checks the "
+        "(type, missing values, odd values), and checks the "
         "claims in your brief (e.g. 'the ID is unique').",
         "A masked summary - the only view of the data the AI ever gets - and a fingerprint of the "
         "original data.",
@@ -496,7 +496,7 @@ story = [
         "cannot answer, with the reason.",
         "The plan, in <b>edit/analysis_plan.yaml</b>. It runs straight on; edit it and re-run "
         "to change it, and your version wins.",
-        "<b>Gate 3</b>: every column and tool exists, the target is yours, nothing personal or "
+        "<b>Gate 3</b>: every column and tool exists, the target is yours, no ID, free-text or "
         "excluded is analysed, a column that gives the answer away is left out, and every "
         "question has enough rows or is marked not possible.",
     ),
@@ -526,7 +526,7 @@ story = [
         "decisions made for you, and a self-critical wrap-up) and four detail documents behind "
         "it.",
         "REPORT.pdf plus details/1_analysis, 2_data_quality, 3_decisions and 4_audit.",
-        "Every number comes from the logs; AI-written text is marked; no personal data appears.",
+        "Every number comes from the logs; AI-written text is marked.",
     ),
     p("The agents side by side", "h1"),
     grid(

@@ -5,7 +5,7 @@ You give it a data file and a short description of the data and what you want to
 Three rules hold throughout:
 
 - **The AI decides, the system executes.** The AI chooses what to do; every change runs through logged, checked operations. The original data is never modified.
-- **The AI never sees rows or personal data.** It works from masked summaries and aggregate counts only.
+- **The AI never sees rows.** It works from summaries and aggregate counts only.
 - **Nothing is decided silently.** Every choice the AI makes is in the report, with its reasons and alternatives, and can be undone.
 
 More detail: [specification](docs/project_spec.pdf) · [working rules](CLAUDE.md) · [design decisions and their reasons](DECISIONS.md)
@@ -15,7 +15,7 @@ More detail: [specification](docs/project_spec.pdf) · [working rules](CLAUDE.md
 | Step | Who | What happens | Command |
 | --- | --- | --- | --- |
 | 1. Describe | You | Write a brief: what the data is, what you want to learn, how unclear cases should be handled. | edit a YAML file |
-| 2. Ingest | System (no AI) | Loads the file exactly as it is, profiles every column, masks personal data, and checks the claims in your brief. **Gate 1** stops here if the file was not read faithfully. | `pipeline.ingest` |
+| 2. Ingest | System (no AI) | Loads the file exactly as it is, profiles every column, and checks the claims in your brief. **Gate 1** stops here if the file was not read faithfully. | `pipeline.ingest` |
 | 3. Diagnose | AI: diagnostic agent | Lists the problems to fix and the judgment calls (questions the data cannot answer on its own), and decides those calls from your brief. | `pipeline.agents.diagnostic` |
 | 4. Check decisions | You (optional) | Change any of the AI's decisions in `edit/decisions.yaml`. | edit a YAML file |
 | 5. Clean | AI: coder and reviewer | The coder writes a cleaning plan, which runs step by step from the original data. **Gate 2** checks the result. The reviewer checks that it makes sense and can send fixes back, at most twice. | `pipeline.clean` |
@@ -40,7 +40,7 @@ A gate is an automatic check between steps. **PASS** continues, **FLAG** continu
   - every change is accounted for, and re-running the plan from the original data gives the identical result
 - **Gate 3, after planning:**
   - every column and tool in the plan exists, and the target is the one in your brief
-  - no ID, personal data, free text or excluded column is analysed
+  - no ID, free text or excluded column is analysed
   - a column that predicts the outcome almost perfectly on its own is left out: it probably gives the answer away
   - every question has enough rows (10 rows with the rarer outcome per regression feature, two groups of 30 to compare), or is marked "not possible" with the reason
 - **Gate 4, after the analysis:**
@@ -222,7 +222,7 @@ Rules every tool follows:
 - **Readable effects.** Numbers are compared in round steps ("alder per 20", "beloeb per 100,000"), and categories against the most common one.
 - **Warnings.** An almost perfect fit (R² or AUC above 0.95) is flagged as possible leakage: a column that gives the answer away. Too few rows for the number of effects is flagged as unstable.
 - **Subgroups and your own ranges.** Every tool can be limited to one subgroup (`subset`, e.g. third class only, or ages below 16; at least 30 rows), and numbers can be grouped at your own cut points (`cuts`, e.g. under and over 16).
-- **Refused as inputs:** the outcome itself, IDs, dates, free text, personal data and excluded columns.
+- **Refused as inputs:** the outcome itself, IDs, dates, free text and excluded columns.
 
 ## Guarantees, and where they are enforced
 
@@ -241,11 +241,11 @@ Rules every tool follows:
 
 | Guarantee | Enforced by |
 | --- | --- |
-| The AI never sees rows or personal data | `ingestion/compact.py` builds the masked summary; tests assert no personal value reaches any prompt |
-| The reviewer's queries reveal no one | `tools/queries.py` returns only counts and summaries, masks personal and ID values inside the query, and refuses to filter on them |
+| The AI never sees rows | Prompts are built only from summaries (`ingestion/compact.py`) and totals; every tool returns aggregates only |
+| The reviewer's queries return no rows | `tools/queries.py` returns only counts and summaries |
 | Error messages sent back to the AI are masked | `agents/feedback.py` |
 | Analysis results reveal no one | `tools/eda.py` and `tools/modeling.py` return only totals, rates and regression effects; groups under 10 rows are merged or hidden |
-| The planner sees no rows | `tools/context.py` describes the clean data in totals only: nothing from ID, personal or free-text columns, no category with fewer than 10 rows |
+| The planner sees no rows | `tools/context.py` describes the clean data in totals only: nothing from ID or free-text columns, no category with fewer than 10 rows |
 
 **AI accountability**
 
@@ -268,7 +268,7 @@ Rules every tool follows:
 | Folder | What it holds |
 | --- | --- |
 | [pipeline/contracts/](pipeline/contracts/) | The data passed between steps, as validated models. Their validators enforce the audit rules. |
-| [pipeline/ingestion/](pipeline/ingestion/) | Loading, profiling, personal-data detection and masking, and claim checks |
+| [pipeline/ingestion/](pipeline/ingestion/) | Loading, profiling and claim checks |
 | [pipeline/ops/](pipeline/ops/) | 15 library operations, the sandboxed `custom_code` operation, and the plan executor |
 | [pipeline/agents/](pipeline/agents/) | The LLM client and the diagnostic, coder, reviewer, planner and analysis agents, with their prompts |
 | [pipeline/checks/](pipeline/checks/) | Gates 1 to 4, the reconciliation checks, the schema contract and the number check |

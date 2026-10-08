@@ -1,8 +1,8 @@
 """What every report shares: the styles, small text helpers, and the run folder read once.
 
 Every document is built only from the files in the run folder, so it can be
-rebuilt for any run and says nothing the logs do not. A PDF gets shared, so it
-holds no personal data. Text written by an AI is marked as such.
+rebuilt for any run and says nothing the logs do not. Text written by an AI is
+marked as such.
 """
 
 from __future__ import annotations

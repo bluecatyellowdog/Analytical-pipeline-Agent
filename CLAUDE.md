@@ -12,7 +12,7 @@ Reference: docs/project_spec.pdf. Read the relevant section before larger change
 - CSV/Excel are loaded as literal text; types are applied later as logged cast ops.
 - No silent coercion (never errors="coerce"); new nulls must be explained.
 - Numbers in reports come from logs, never from LLM text.
-- The LLM never sees raw rows or personal data; only compact, masked profiles.
+- The LLM never sees raw rows; only compact profiles and aggregates.
 - Deterministic checks first, judgment second. No judgment call is settled silently: the user
   decides it, or (brief `judgment_calls: decide`, the default) the AI decides it from the brief,
   with choice, confidence, reasoning and alternatives in the report, reversible in decisions.yaml.
