@@ -206,6 +206,7 @@ The analysis agent does not write code: it picks from a fixed set of tested tool
 | `summary_table` | The basic numbers for every column: averages, spread and ranges, yes/no shares, categories, date ranges. |
 | `distribution` | How are a column's values spread? |
 | `target_by_group` | What is the outcome in each group or range? The rate for a yes/no outcome, the average for a number, with 95% intervals. |
+| `target_by_two_groups` | Does a difference hold in every group? The outcome for every combination of two columns, e.g. sex within each class. |
 | `compare_by_target` | How does a number differ between the two outcomes of a yes/no target? |
 | `correlation` | Which numbers move together? |
 | `missingness` | Where are values missing, and does that relate to the outcome? |
@@ -218,6 +219,7 @@ Rules every tool follows:
 - **Classic, simple statistics.** Each regression is fitted once on all usable rows and reports 95% intervals and p-values. There is no machine learning and no cross-validation. Finding no effect is a valid result.
 - **Readable effects.** Numbers are compared in round steps ("alder per 20", "beloeb per 100,000"), and categories against the most common one.
 - **Warnings.** An almost perfect fit (R² or AUC above 0.95) is flagged as possible leakage: a column that gives the answer away. Too few rows for the number of effects is flagged as unstable.
+- **Subgroups and your own ranges.** Every tool can be limited to one subgroup (`subset`, e.g. third class only, or ages below 16; at least 30 rows), and numbers can be grouped at your own cut points (`cuts`, e.g. under and over 16).
 - **Refused as inputs:** the outcome itself, IDs, dates, free text, personal data and excluded columns.
 
 ## Guarantees, and where they are enforced
