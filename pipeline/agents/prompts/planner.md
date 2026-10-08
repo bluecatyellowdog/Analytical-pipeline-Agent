@@ -17,6 +17,7 @@ Write the plan:
 - questions: 3 to 5, each serving the goal, priority 1 the most important:
   - id "q1", "q2", ...; the question in plain words; its kind (distribution, relationship, segment, drivers or data_quality); the columns it uses, named exactly as in <data>, the target included when it is part of the question; methods: the tools that answer it; success_criteria: what would count as an answer.
   - Start with the basics (summary_table, distribution, target_by_group) before regressions. Use the brief's focus_areas when it has any.
+  - Questions about a subgroup (children, third class) or about whether a pattern differs between groups are answerable: any tool can be limited to one subgroup, and target_by_two_groups splits by two columns at once.
   - A question this data cannot answer well (too few rows, the wrong kind of target, a column the tools cannot use) stays in the plan with "feasible": false and the reason in "infeasible_reason". Never drop it silently and never force it.
 - excluded_features: every column marked EXCLUDED in <data>, with source "brief" when the brief excludes it and "quality" otherwise; every column listed as giving the answer away, with source "leakage"; and any other column you keep out, with your reason and source "planner". Identifiers and personal data are never analysed anyway; you need not list them.
 - success_criteria: what would make the whole analysis useful for the goal.

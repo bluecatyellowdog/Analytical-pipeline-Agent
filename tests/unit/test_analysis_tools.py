@@ -92,6 +92,7 @@ class TestRegistry:
             "summary_table",
             "distribution",
             "target_by_group",
+            "target_by_two_groups",
             "compare_by_target",
             "correlation",
             "missingness",
@@ -449,6 +450,99 @@ class TestAuditAndPrivacy:
         assert "Hovedstaden" in call.summary and "%" in call.summary
         call = run_tool(ctx, "logistic_regression", {}, question_id="q1")
         assert "beloeb x" in call.summary and "per 100,000" in call.summary
+
+
+class TestSubgroupsAndRanges:
+    def test_any_tool_can_look_inside_a_subgroup(self, ctx) -> None:
+        call = run_tool(
+            ctx,
+            "target_by_group",
+            {"column": "beloeb", "subset": {"column": "alder", "below": 40}},
+            question_id="q1",
+        )
+        data = only(call).data
+        assert sum(g["n"] for g in data["groups"]) == int((ctx.frame["alder"] < 40).sum())
+        assert data["subset"] == "alder below 40"
+        assert call.summary.startswith("Within alder below 40:")
+        assert "(within alder below 40)" in only(call).title
+
+    def test_a_subgroup_by_values_works_for_models_too(self, ctx) -> None:
+        wanted = ["Hovedstaden", "Sjælland"]
+        call = run_tool(
+            ctx,
+            "logistic_regression",
+            {"features": ["alder", "beloeb"], "subset": {"column": "region", "values": wanted}},
+            question_id="q1",
+        )
+        expected = int(ctx.frame["region"].isin(wanted).sum())
+        assert fit_of(call)["rows_used"] == expected
+        assert len(ctx.frame) == 600, "the data itself is never filtered"
+
+    def test_a_subgroup_must_be_usable_and_big_enough(self, ctx) -> None:
+        ctx.frame.loc[:3, "region"] = "Bornholm"
+        for subset, message in [
+            ({"column": "region", "values": ["Bornholm"]}, "fewer than 30 rows"),
+            ({"column": "kunde_id", "values": ["00001"]}, "kunde_id cannot define a subgroup"),
+            ({"column": "region"}, "values, at_least or below"),
+            ({"column": "region", "below": 3}, "need a number column"),
+        ]:
+            with pytest.raises(ToolError, match=message):
+                run_tool(ctx, "missingness", {"subset": subset}, question_id="q1")
+
+    def test_your_own_ranges(self, ctx) -> None:
+        data = only(
+            run_tool(
+                ctx, "target_by_group", {"column": "alder", "cuts": [30, 50]}, question_id="q1"
+            )
+        ).data
+        assert [g["group"] for g in data["groups"]] == [
+            "below 30",
+            "30 to below 50",
+            "50 and over",
+        ]
+        assert sum(g["n"] for g in data["groups"]) == 600
+
+    def test_the_target_for_every_combination_of_two_columns(self, ctx) -> None:
+        call = run_tool(
+            ctx,
+            "target_by_two_groups",
+            {"column_a": "region", "column_b": "beloeb", "cuts_b": [200000]},
+            question_id="q1",
+        )
+        data = only(call).data
+        cells = data["groups"]
+        assert {c["group_b"] for c in cells} == {"below 200,000", "200,000 and over"}
+        assert sum(c["n"] for c in cells) + data["hidden_rows"] == 600
+        for cell in cells:
+            assert cell["n"] >= 10 and 0 <= cell["ci_low"] <= cell["rate"] <= cell["ci_high"] <= 1
+        big = [c["rate"] for c in cells if c["group_b"] == "200,000 and over"]
+        small = [c["rate"] for c in cells if c["group_b"] == "below 200,000"]
+        assert min(big) > max(small) * 0.9, "bigger loans default more in every region"
+        assert any(a.kind == "chart" for a in call.artifacts)
+
+    def test_two_way_cells_too_small_to_show_are_hidden(self, ctx) -> None:
+        ctx.frame.loc[:3, "region"] = "Bornholm"
+        data = only(
+            run_tool(
+                ctx,
+                "target_by_two_groups",
+                {"column_a": "region", "column_b": "beloeb", "bins": 2},
+                question_id="q1",
+            )
+        ).data
+        assert "Bornholm" not in {c["group_a"] for c in data["groups"]}
+        assert data["hidden_rows"] >= 4
+
+    def test_a_numeric_target_by_two_groups_is_a_mean(self, rate_ctx) -> None:
+        data = only(
+            run_tool(
+                rate_ctx,
+                "target_by_two_groups",
+                {"column_a": "region", "column_b": "alder", "cuts_b": [50]},
+                question_id="q1",
+            )
+        ).data
+        assert data["measure"] == "mean" and all("mean" in c for c in data["groups"])
 
 
 def test_the_frame_is_never_changed(ctx) -> None:

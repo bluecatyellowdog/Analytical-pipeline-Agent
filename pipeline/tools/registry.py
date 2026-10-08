@@ -37,8 +37,25 @@ class ToolError(ValueError):
     """The call was refused; the message says why, for the agent to correct it."""
 
 
+MIN_SUBSET_ROWS = 30
+"""A subgroup smaller than this says too little, and gets close to describing individuals."""
+
+
+class Subset(BaseModel):
+    """Which rows a tool looks at: one subgroup, by its values or a number range."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    column: str
+    values: list[str | int | float | bool] | None = None
+    at_least: float | None = None
+    below: float | None = None
+
+
 class Params(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    subset: Subset | None = None
 
 
 @dataclass
@@ -227,7 +244,15 @@ def run_tool(
 
     call_id = new_id("call")
     started = time.perf_counter()
+    where = None
+    if validated.subset is not None:
+        ctx, where = narrow(ctx, validated.subset)
     results = spec.run(ctx, validated)
+    if where is not None:
+        for result in results:
+            result.title += f" (within {where})"
+            result.summary = f"Within {where}: {result.summary}"
+            result.data = {**result.data, "subset": where}
     artifacts = [_artifact(ctx, result, name, call_id, question_id) for result in results]
     call = ToolCall(
         call_id=call_id,
@@ -270,15 +295,80 @@ def _artifact(
     return artifact
 
 
+def narrow(ctx: AnalysisContext, subset: Subset) -> tuple[AnalysisContext, str]:
+    """This context with only the rows of one subgroup, and the subgroup in words.
+
+    The data itself is never filtered: the tool gets a copy of the rows it may see.
+    """
+    column = subset.column
+    kind = ctx.require(column)
+    if kind not in (*FEATURE_KINDS,) or column in ctx.excluded:
+        why = "excluded from the analysis" if column in ctx.excluded else f"a {kind} column"
+        raise ToolError(f"{column} cannot define a subgroup: it is {why}")
+    values = ctx.frame[column]
+    keep = values.notna()
+    parts = []
+    if subset.values is not None:
+        if kind == "numeric":
+            try:
+                wanted = [float(v) for v in subset.values]
+            except (TypeError, ValueError):
+                raise ToolError(f"{column} is a number: give numbers in values") from None
+            keep &= pd.to_numeric(values).astype(float).isin(wanted)
+        elif kind == "boolean":
+            flags, wanted = as_yes_no(values), as_yes_no(pd.Series(subset.values, dtype=object))
+            if flags is None or wanted is None:
+                raise ToolError(f"{column} is yes/no: give yes/no values")
+            keep &= flags.isin(list(wanted.dropna())).fillna(False).astype(bool)
+        else:
+            keep &= values.astype(str).isin([str(v) for v in subset.values])
+        parts.append(f"{column} = " + " or ".join(str(v) for v in subset.values))
+    if subset.at_least is not None or subset.below is not None:
+        if kind != "numeric":
+            raise ToolError("at_least and below need a number column")
+        numbers = pd.to_numeric(values).astype(float)
+        if subset.at_least is not None:
+            keep &= numbers >= subset.at_least
+        if subset.below is not None:
+            keep &= numbers < subset.below
+        parts.append(_range_words(column, subset.at_least, subset.below))
+    if not parts:
+        raise ToolError("a subset needs values, at_least or below")
+    where = " and ".join(parts)
+    if int(keep.sum()) < MIN_SUBSET_ROWS:
+        raise ToolError(
+            f"the subgroup {where} has fewer than {MIN_SUBSET_ROWS} rows; choose a bigger one"
+        )
+    return replace(ctx, frame=ctx.frame[keep.astype(bool)]), where
+
+
+def _range_words(column: str, at_least: float | None, below: float | None) -> str:
+    def show(value: float) -> str:
+        return f"{value:g}" if abs(value) < 1e6 else f"{value:,.0f}"
+
+    if at_least is not None and below is not None:
+        return f"{column} from {show(at_least)} to below {show(below)}"
+    if below is not None:
+        return f"{column} below {show(below)}"
+    return f"{column} at least {show(at_least)}"
+
+
 def describe_tools() -> str:
     """Every tool with its purpose and parameters, for a prompt. Generated, so it cannot drift."""
-    lines = []
+    lines = [
+        "Every tool also takes subset, to look at one subgroup only: "
+        '{"column": "Pclass", "values": [3]}, or a number range with at_least and/or below, '
+        'e.g. {"column": "Age", "below": 16}. A subgroup needs at least '
+        f"{MIN_SUBSET_ROWS} rows.",
+    ]
     for name in tool_names():
         spec = REGISTRY[name]
         lines.append(f"- {name}: {(spec.doc.strip().splitlines() or [''])[0]}")
         schema = spec.params_model.model_json_schema()
         required = set(schema.get("required", []))
         for field_name, field_schema in schema.get("properties", {}).items():
+            if field_name == "subset":
+                continue
             default = "" if field_name in required else f", default {field_schema.get('default')!r}"
             description = field_schema.get("description", "")
             lines.append(f"    {field_name}{default}" + (f": {description}" if description else ""))

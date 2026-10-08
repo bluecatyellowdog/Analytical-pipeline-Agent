@@ -45,6 +45,7 @@ TARGET_METHODS = {
     "compare_by_target": "binary",
     "linear_regression": "numeric",
     "target_by_group": "any",
+    "target_by_two_groups": "any",
 }
 FEATURE_METHODS = (*TARGET_METHODS, "correlation")
 REGRESSIONS = ("logistic_regression", "linear_regression")

@@ -73,16 +73,26 @@ def _show(value: float, measure: str) -> str:
 
 
 def _groups(
-    ctx: AnalysisContext, column: str, kind: str, bins: int
+    ctx: AnalysisContext, column: str, kind: str, bins: int, cuts: list[float] | None = None
 ) -> tuple[pd.Series, list[str] | None]:
     """Each row's group label (a value, a numeric range, or (missing)) and, for numbers,
-    the labels in ascending order."""
+    the labels in ascending order. `cuts` are the user's own cut points for a number."""
     values = ctx.frame[column]
+    if cuts and kind != "numeric":
+        raise ToolError(f"cuts are for number columns; {column} is {kind}")
     if kind != "numeric":
         return values.map(lambda v: str(v) if pd.notna(v) else MISSING).astype(object), None
     numbers = pd.to_numeric(values, errors="raise").astype(float)
     present = numbers.dropna()
     labels = pd.Series(MISSING, index=values.index, dtype=object)
+    if cuts:
+        edges = sorted({float(c) for c in cuts})
+        names = [f"below {fmt(edges[0])}"]
+        names += [f"{fmt(a)} to below {fmt(b)}" for a, b in zip(edges, edges[1:], strict=False)]
+        names.append(f"{fmt(edges[-1])} and over")
+        binned = pd.cut(present, [-math.inf, *edges, math.inf], right=False, labels=names)
+        labels.loc[present.index] = binned.astype(object)
+        return labels, [*names, MISSING]
     if present.nunique() <= bins:
         ordered = [fmt(v) for v in sorted(present.unique())]
         labels.loc[present.index] = present.map(fmt)
@@ -354,6 +364,11 @@ class GroupParams(Params):
         description="Ranges a number is split into. A number with this many distinct values "
         "or fewer (a count such as 0-6) is grouped value by value instead.",
     )
+    cuts: list[float] | None = Field(
+        default=None,
+        description="Your own cut points for a number, e.g. [16, 30] gives 'below 16', "
+        "'16 to below 30' and '30 and over'. Used instead of bins.",
+    )
     outcome: str | None = Field(
         default=None,
         description="A numeric or yes/no column to compare across the groups instead of the "
@@ -369,7 +384,7 @@ def target_by_group(ctx: AnalysisContext, params: GroupParams) -> list[ToolResul
     kind = ctx.feature(column)
     target, measure = _target(ctx)
     present = target.notna()
-    labels, order = _groups(ctx, column, kind, params.bins)
+    labels, order = _groups(ctx, column, kind, params.bins, params.cuts)
     values = target[present].astype(float)
 
     table = (
@@ -433,6 +448,113 @@ def target_by_group(ctx: AnalysisContext, params: GroupParams) -> list[ToolResul
             summary=text,
             figure=figure,
             min_group_n=min((r["n"] for r in rows), default=None),
+        )
+    ]
+
+
+# -- the target by two groups at once ------------------------------------------
+
+
+class TwoGroupParams(Params):
+    column_a: str
+    column_b: str
+    bins: int = Field(default=3, ge=2, le=6, description="Ranges a number is split into.")
+    cuts_a: list[float] | None = Field(default=None, description="Own cut points for column_a.")
+    cuts_b: list[float] | None = Field(default=None, description="Own cut points for column_b.")
+    outcome: str | None = Field(
+        default=None, description="Another numeric or yes/no column to compare instead."
+    )
+
+
+@register("target_by_two_groups", TwoGroupParams, ("segment", "relationship"))
+def target_by_two_groups(ctx: AnalysisContext, params: TwoGroupParams) -> list[ToolResult]:
+    """The target's rate or mean for every combination of two columns, e.g. sex within class."""
+    ctx = ctx.with_outcome(params.outcome)
+    a, b = params.column_a, params.column_b
+    if a == b:
+        raise ToolError("column_a and column_b must be different columns")
+    kind_a, kind_b = ctx.feature(a), ctx.feature(b)
+    target, measure = _target(ctx)
+    present = target.notna()
+    labels_a, order_a = _groups(ctx, a, kind_a, params.bins, params.cuts_a)
+    labels_b, order_b = _groups(ctx, b, kind_b, params.bins, params.cuts_b)
+    values = target[present].astype(float)
+    table = (
+        pd.DataFrame(
+            {
+                "a": labels_a[present],
+                "b": labels_b[present],
+                "value": values,
+                "square": values**2,
+            }
+        )
+        .groupby(["a", "b"], sort=False)
+        .agg(n=("value", "size"), total=("value", "sum"), squares=("square", "sum"))
+        .reset_index()
+    )
+    small = table["n"] < ctx.min_group_n
+    hidden = int(table.loc[small, "n"].sum())
+    table = table[~small]
+    order_a = order_a or list(labels_a[present].value_counts().index)
+    order_b = order_b or list(labels_b[present].value_counts().index)
+    rank_a = {label: i for i, label in enumerate(order_a)}
+    rank_b = {label: i for i, label in enumerate(order_b)}
+    table = table.assign(_a=table["a"].map(rank_a), _b=table["b"].map(rank_b)).sort_values(
+        ["_a", "_b"], kind="stable"
+    )
+
+    overall = float(values.mean())
+    cells = []
+    for row in table.itertuples():
+        n = int(row.n)
+        value = float(row.total / n)
+        cell = {"group_a": row.a, "group_b": row.b, "n": n}
+        if measure == "rate":
+            events = int(round(row.total))
+            low, high = wilson(events, n)
+            cell |= {"events": events, "rate": value}
+        else:
+            low, high = mean_interval(value, float(row.squares), n)
+            cell |= {"mean": value}
+        cells.append(cell | {"ci_low": low, "ci_high": high})
+
+    text = (
+        f"{measure.title()} of {ctx.target} by {a} and {b} (overall {_show(overall, measure)}): "
+        + "; ".join(
+            f"{c['group_a']} / {c['group_b']}: {_show(c[measure], measure)} (95% interval "
+            f"{_show(c['ci_low'], measure)} to {_show(c['ci_high'], measure)}, n={c['n']})"
+            for c in cells
+        )
+    )
+    if hidden:
+        text += f"; {hidden} row(s) in combinations too small to show"
+    shown_a = [g for g in order_a if any(c["group_a"] == g for c in cells)]
+    shown_b = [g for g in order_b if any(c["group_b"] == g for c in cells)]
+    figure = charts.grouped_bars(
+        shown_a,
+        shown_b,
+        {(c["group_a"], c["group_b"]): c[measure] for c in cells},
+        title=f"{ctx.target} {measure} by {a} and {b}",
+        ylabel=f"{ctx.target} {measure}",
+        legend=b,
+        reference=overall,
+        percent=measure == "rate",
+    )
+    return [
+        ToolResult(
+            title=f"{ctx.target} {measure} by {a} and {b}",
+            data={
+                "column_a": a,
+                "column_b": b,
+                "target": ctx.target,
+                "measure": measure,
+                "overall": overall,
+                "groups": cells,
+                "hidden_rows": hidden,
+            },
+            summary=text,
+            figure=figure,
+            min_group_n=min((c["n"] for c in cells), default=None),
         )
     ]
 

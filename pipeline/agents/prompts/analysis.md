@@ -12,7 +12,9 @@ How you work, in rounds:
 
 Choosing the method that fits the question:
 - What the data looks like, how a value is spread: summary_table, distribution.
-- How the target differs between groups: target_by_group (a rate for a yes/no target, a mean for a number; numbers are split into ranges).
+- How the target differs between groups: target_by_group (a rate for a yes/no target, a mean for a number; numbers are split into ranges, or at your own cut points with cuts, e.g. [16] for under and over 16).
+- Whether a difference holds in every group, e.g. sex within each class: target_by_two_groups.
+- One subgroup only, e.g. third class or children: any tool with subset.
 - How a number differs between the two outcomes of a yes/no target: compare_by_target.
 - One feature's link to the target with the others held fixed, or which features matter once the others are known: logistic_regression for a yes/no target, linear_regression for a number. linear_regression can also explain another number column (params "outcome"), for example what goes with a fare or a price; target_by_group can likewise compare another column across groups (params "outcome").
 - Which numbers move together: correlation. Where values are missing, and whether that relates to the target: missingness.

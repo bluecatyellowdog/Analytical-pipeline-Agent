@@ -59,6 +59,35 @@ def bars(
     return figure
 
 
+def grouped_bars(
+    groups: Sequence[str],
+    series: Sequence[str],
+    values: dict[tuple[str, str], float],
+    *,
+    title: str,
+    ylabel: str,
+    legend: str,
+    reference: float | None = None,
+    percent: bool = False,
+):
+    """One cluster of bars per group, one bar per series; a missing combination is left out."""
+    figure, axes = _figure(title)
+    width = 0.8 / max(len(series), 1)
+    for j, name in enumerate(series):
+        offset = (j - (len(series) - 1) / 2) * width
+        heights = [values.get((group, name), float("nan")) for group in groups]
+        axes.bar([i + offset for i in range(len(groups))], heights, width=width, label=str(name))
+    axes.set_xticks(range(len(groups)), [str(g) for g in groups], rotation=30, ha="right")
+    axes.set_ylabel(ylabel, fontsize=8)
+    if reference is not None:
+        axes.axhline(reference, color=REFERENCE, linewidth=1, linestyle="--")
+    axes.legend(fontsize=7, frameon=False, title=legend, title_fontsize=7)
+    if percent:
+        axes.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    figure.tight_layout()
+    return figure
+
+
 def histogram(edges: Sequence[float], counts: Sequence[int], *, title: str, xlabel: str):
     figure, axes = _figure(title)
     widths = [b - a for a, b in zip(edges[:-1], edges[1:], strict=True)]
