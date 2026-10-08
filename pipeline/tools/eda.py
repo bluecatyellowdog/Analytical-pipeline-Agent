@@ -10,6 +10,7 @@ yes/no target is described by its rate, a numeric target by its mean.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import Literal
 
 import numpy as np
@@ -555,6 +556,175 @@ def target_by_two_groups(ctx: AnalysisContext, params: TwoGroupParams) -> list[T
             summary=text,
             figure=figure,
             min_group_n=min((c["n"] for c in cells), default=None),
+        )
+    ]
+
+
+# -- the target by a ratio of two columns ----------------------------------------
+
+
+class RatioParams(Params):
+    numerator: str
+    denominator: str
+    bins: int = Field(default=5, ge=2, le=10, description="Ranges the ratio is split into.")
+    cuts: list[float] | None = Field(
+        default=None, description="Your own cut points for the ratio, e.g. [0.5, 1]."
+    )
+    outcome: str | None = Field(
+        default=None, description="Another numeric or yes/no column to compare instead."
+    )
+
+
+@register("target_by_ratio", RatioParams, ("relationship", "segment", "drivers"))
+def target_by_ratio(ctx: AnalysisContext, params: RatioParams) -> list[ToolResult]:
+    """The target per group of one number divided by another, e.g. loan amount / income."""
+    ctx = ctx.with_outcome(params.outcome)
+    top_name, bottom_name = params.numerator, params.denominator
+    if top_name == bottom_name:
+        raise ToolError("a ratio needs two different columns")
+    for column in (top_name, bottom_name):
+        if ctx.feature(column) != "numeric":
+            raise ToolError(f"{column} is not a number; a ratio needs two number columns")
+    top = pd.to_numeric(ctx.frame[top_name]).astype(float)
+    bottom = pd.to_numeric(ctx.frame[bottom_name]).astype(float)
+    usable = top.notna() & bottom.notna() & (bottom != 0)
+    left_out = int((~usable).sum())
+    name = f"{top_name} / {bottom_name}"
+    frame = ctx.frame.loc[usable].copy()
+    frame[name] = top[usable] / bottom[usable]
+    ratio_ctx = replace(ctx, frame=frame, kinds={**ctx.kinds, name: "numeric"})
+    results = target_by_group(
+        ratio_ctx, GroupParams(column=name, bins=params.bins, cuts=params.cuts)
+    )
+    for result in results:
+        result.data = {
+            **result.data,
+            "ratio": name,
+            "numerator": top_name,
+            "denominator": bottom_name,
+            "left_out": left_out,
+        }
+        if left_out:
+            result.summary += (
+                f"; {left_out} row(s) left out because {bottom_name} is missing or 0, or "
+                f"{top_name} is missing"
+            )
+    return results
+
+
+# -- the target over time ----------------------------------------------------------
+
+PERIOD_CODES = {"year": "Y", "quarter": "Q", "month": "M"}
+
+
+class TrendParams(Params):
+    column: str
+    period: Literal["year", "quarter", "month"] = "year"
+    outcome: str | None = Field(
+        default=None, description="Another numeric or yes/no column to follow instead."
+    )
+
+
+@register("trend_over_time", TrendParams, ("distribution", "relationship", "segment"))
+def trend_over_time(ctx: AnalysisContext, params: TrendParams) -> list[ToolResult]:
+    """The target's rate or mean per year, quarter or month; rows per period without a target."""
+    ctx = ctx.with_outcome(params.outcome)
+    column = params.column
+    if ctx.require(column) != "date":
+        raise ToolError(f"{column} is not a date column; trend_over_time needs one")
+    if column in ctx.excluded:
+        raise ToolError(f"{column} is excluded from the analysis and cannot be used")
+    try:
+        dates = pd.to_datetime(ctx.frame[column])
+    except (TypeError, ValueError) as error:
+        raise ToolError(f"{column} could not be read as dates") from error
+    try:
+        target, measure = _target(ctx)
+    except ToolError:
+        target, measure = None, "rows"
+
+    keep = dates.notna() if target is None else dates.notna() & target.notna()
+    periods = dates[keep].dt.to_period(PERIOD_CODES[params.period]).astype(str)
+    if target is None:
+        table = periods.value_counts().rename_axis("period").reset_index(name="n")
+        table["total"] = table["squares"] = 0.0
+    else:
+        values = target[keep].astype(float)
+        table = (
+            pd.DataFrame({"period": periods, "value": values, "square": values**2})
+            .groupby("period")
+            .agg(n=("value", "size"), total=("value", "sum"), squares=("square", "sum"))
+            .reset_index()
+        )
+    table = table.sort_values("period")
+    small = table["n"] < ctx.min_group_n
+    hidden = int(table.loc[small, "n"].sum())
+    table = table[~small]
+
+    rows = []
+    for row in table.itertuples():
+        n = int(row.n)
+        entry = {"period": str(row.period), "n": n}
+        if measure == "rate":
+            events = int(round(row.total))
+            low, high = wilson(events, n)
+            entry |= {"events": events, "rate": row.total / n, "ci_low": low, "ci_high": high}
+        elif measure == "mean":
+            mean = float(row.total / n)
+            low, high = mean_interval(mean, float(row.squares), n)
+            entry |= {"mean": mean, "ci_low": low, "ci_high": high}
+        rows.append(entry)
+
+    if measure == "rows":
+        head = f"Rows per {params.period} of {column}: "
+        body = "; ".join(f"{r['period']}: {r['n']}" for r in rows)
+        overall = None
+    else:
+        overall = float(target[keep].astype(float).mean())
+        head = (
+            f"{measure.title()} of {ctx.target} per {params.period} of {column} (overall "
+            f"{_show(overall, measure)}): "
+        )
+        body = "; ".join(
+            f"{r['period']}: {_show(r[measure], measure)} (95% interval "
+            f"{_show(r['ci_low'], measure)} to {_show(r['ci_high'], measure)}, n={r['n']})"
+            for r in rows
+        )
+    text = head + (body or "no period has enough rows to show")
+    if hidden:
+        text += f"; {hidden} row(s) in periods too small to show"
+    key = "n" if measure == "rows" else measure
+    figure = charts.trend(
+        [r["period"] for r in rows],
+        [r[key] for r in rows],
+        lower=None if measure == "rows" else [r["ci_low"] for r in rows],
+        upper=None if measure == "rows" else [r["ci_high"] for r in rows],
+        title=(
+            f"Rows per {params.period}"
+            if measure == "rows"
+            else f"{ctx.target} {measure} per {params.period} (95% interval)"
+        ),
+        ylabel="rows" if measure == "rows" else f"{ctx.target} {measure}",
+        reference=overall,
+        percent=measure == "rate",
+    )
+    return [
+        ToolResult(
+            title=f"{'Rows' if measure == 'rows' else f'{ctx.target} {measure}'} per "
+            f"{params.period} of {column}",
+            data={
+                "column": column,
+                "period": params.period,
+                "target": ctx.target,
+                "measure": measure,
+                "overall": overall,
+                "periods": rows,
+                "hidden_rows": hidden,
+                "missing_dates": int(ctx.frame[column].isna().sum()),
+            },
+            summary=text,
+            figure=figure,
+            min_group_n=min((r["n"] for r in rows), default=None),
         )
     ]
 

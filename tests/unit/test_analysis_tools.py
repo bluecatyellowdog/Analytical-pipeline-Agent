@@ -93,6 +93,8 @@ class TestRegistry:
             "distribution",
             "target_by_group",
             "target_by_two_groups",
+            "target_by_ratio",
+            "trend_over_time",
             "compare_by_target",
             "correlation",
             "missingness",
@@ -543,6 +545,85 @@ class TestSubgroupsAndRanges:
             )
         ).data
         assert data["measure"] == "mean" and all("mean" in c for c in data["groups"])
+
+
+class TestTrendsAndRatios:
+    def test_the_target_per_year(self, ctx) -> None:
+        call = run_tool(
+            ctx, "trend_over_time", {"column": "oprettet", "period": "year"}, question_id="q1"
+        )
+        data = only(call).data
+        assert [p["period"] for p in data["periods"]] == [str(y) for y in range(2019, 2025)]
+        assert sum(p["n"] for p in data["periods"]) == 600
+        for period in data["periods"]:
+            assert 0 <= period["ci_low"] <= period["rate"] <= period["ci_high"] <= 1
+        assert any(a.kind == "chart" for a in call.artifacts)
+
+    def test_periods_too_small_to_show_are_hidden(self, ctx) -> None:
+        data = only(
+            run_tool(
+                ctx, "trend_over_time", {"column": "oprettet", "period": "month"}, question_id="q1"
+            )
+        ).data
+        assert all(p["n"] >= 10 for p in data["periods"])
+        assert sum(p["n"] for p in data["periods"]) + data["hidden_rows"] == 600
+        assert data["hidden_rows"] > 0, "600 loans over 72 months leaves some months thin"
+
+    def test_a_numeric_target_over_time_is_a_mean(self, rate_ctx) -> None:
+        data = only(
+            run_tool(rate_ctx, "trend_over_time", {"column": "oprettet"}, question_id="q1")
+        ).data
+        assert data["measure"] == "mean" and all("mean" in p for p in data["periods"])
+
+    def test_without_a_target_the_trend_counts_rows(self, ctx) -> None:
+        ctx.target = None
+        data = only(
+            run_tool(
+                ctx, "trend_over_time", {"column": "oprettet", "period": "year"}, question_id="q1"
+            )
+        ).data
+        assert data["measure"] == "rows" and sum(p["n"] for p in data["periods"]) == 600
+
+    def test_a_trend_needs_a_date_column(self, ctx) -> None:
+        with pytest.raises(ToolError, match="alder is not a date"):
+            run_tool(ctx, "trend_over_time", {"column": "alder"}, question_id="q1")
+
+    def test_the_target_by_a_ratio_of_two_columns(self, ctx) -> None:
+        call = run_tool(
+            ctx,
+            "target_by_ratio",
+            {"numerator": "beloeb", "denominator": "indkomst", "bins": 4},
+            question_id="q1",
+        )
+        data = only(call).data
+        rates = [g["rate"] for g in data["groups"]]
+        assert len(rates) == 4 and rates[-1] > 2 * rates[0], "risk is built on loan / income"
+        assert data["ratio"] == "beloeb / indkomst"
+        assert "beloeb / indkomst" in call.summary
+
+    def test_a_ratio_leaves_out_rows_it_cannot_divide(self, ctx) -> None:
+        ctx.frame.loc[:2, "indkomst"] = 0.0
+        ctx.frame.loc[3:4, "indkomst"] = None
+        data = only(
+            run_tool(
+                ctx,
+                "target_by_ratio",
+                {"numerator": "beloeb", "denominator": "indkomst", "cuts": [0.5]},
+                question_id="q1",
+            )
+        ).data
+        assert data["left_out"] == 5
+        assert [g["group"] for g in data["groups"]] == ["below 0.5", "0.5 and over"]
+        assert sum(g["n"] for g in data["groups"]) == 595
+
+    def test_a_ratio_needs_two_usable_number_columns(self, ctx) -> None:
+        for params, message in [
+            ({"numerator": "beloeb", "denominator": "region"}, "region is not a number"),
+            ({"numerator": "kunde_id", "denominator": "beloeb"}, "kunde_id"),
+            ({"numerator": "beloeb", "denominator": "beloeb"}, "two different columns"),
+        ]:
+            with pytest.raises(ToolError, match=message):
+                run_tool(ctx, "target_by_ratio", params, question_id="q1")
 
 
 def test_the_frame_is_never_changed(ctx) -> None:

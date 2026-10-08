@@ -46,6 +46,7 @@ TARGET_METHODS = {
     "linear_regression": "numeric",
     "target_by_group": "any",
     "target_by_two_groups": "any",
+    "target_by_ratio": "any",
 }
 FEATURE_METHODS = (*TARGET_METHODS, "correlation")
 REGRESSIONS = ("logistic_regression", "linear_regression")
@@ -240,10 +241,14 @@ def _unusable_columns(
                 )
             elif column in excluded:
                 problems.append(f"{q.id} uses {column}, which is excluded from the analysis")
-            elif kind == "date" and any(m in FEATURE_METHODS for m in q.methods):
+            elif (
+                kind == "date"
+                and any(m in FEATURE_METHODS for m in q.methods)
+                and "trend_over_time" not in q.methods
+            ):
                 problems.append(
                     f"{q.id} uses the date {column} with a method that needs numbers or "
-                    f"categories; describe dates with distribution or summary_table"
+                    f"categories; use dates with trend_over_time, distribution or summary_table"
                 )
     return problems
 

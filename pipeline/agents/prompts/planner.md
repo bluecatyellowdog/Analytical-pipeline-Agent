@@ -26,7 +26,7 @@ Write the plan:
 The plan is checked against these rules (Gate 3). A plan that breaks one comes back to you with the problems:
 - Every column exists exactly as named in <data>, and every method is one of the tools below.
 - The target is the brief's target, and task_type fits it.
-- No identifier, personal-data, free-text or EXCLUDED column appears in a question. Dates only with distribution or summary_table.
+- No identifier, personal-data, free-text or EXCLUDED column appears in a question. Dates only with trend_over_time, distribution or summary_table.
 - logistic_regression and compare_by_target need a yes/no target; linear_regression needs a numeric target; target_by_group needs a target.
 - A regression needs at least 10 rows with the rarer outcome (logistic) or 10 rows (linear) for each feature column in its question; with no feature columns listed it uses every usable column. Comparing groups needs at least two groups of 30 rows. Otherwise mark the question infeasible.
 - Every column that gives the answer away is in excluded_features with source "leakage".

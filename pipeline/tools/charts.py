@@ -88,6 +88,35 @@ def grouped_bars(
     return figure
 
 
+def trend(
+    labels: Sequence[str],
+    values: Sequence[float],
+    *,
+    title: str,
+    ylabel: str,
+    lower: Sequence[float] | None = None,
+    upper: Sequence[float] | None = None,
+    reference: float | None = None,
+    percent: bool = False,
+):
+    """A value per period as a line, with its interval as a shaded band."""
+    figure, axes = _figure(title)
+    positions = list(range(len(values)))
+    if lower is not None and upper is not None:
+        axes.fill_between(positions, lower, upper, color=BAR, alpha=0.15, linewidth=0)
+    axes.plot(positions, values, color=BAR, marker="o", markersize=3, linewidth=1.2)
+    step = max(1, len(labels) // 12)
+    axes.set_xticks(positions[::step], [str(label) for label in labels][::step])
+    axes.tick_params(axis="x", rotation=30)
+    axes.set_ylabel(ylabel, fontsize=8)
+    if reference is not None:
+        axes.axhline(reference, color=REFERENCE, linewidth=1, linestyle="--")
+    if percent:
+        axes.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    figure.tight_layout()
+    return figure
+
+
 def histogram(edges: Sequence[float], counts: Sequence[int], *, title: str, xlabel: str):
     figure, axes = _figure(title)
     widths = [b - a for a, b in zip(edges[:-1], edges[1:], strict=True)]

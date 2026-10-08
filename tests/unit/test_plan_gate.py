@@ -130,6 +130,14 @@ class TestInvariants:
         assert "methods_fit_target" in failed(gate)
         assert "linear_regression" in " ".join(problems_of(gate))
 
+    def test_a_date_may_be_followed_over_time(self, ctx) -> None:
+        questions = [
+            *GOOD_QUESTIONS[:2],
+            question("q3", "relationship", ["oprettet", "misligholdt"], ["trend_over_time"]),
+        ]
+        gate = gate_3_plan(plan(questions=questions), ctx, BRIEF)
+        assert gate.outcome == "pass", problems_of(gate)
+
     def test_linear_regression_may_explain_another_number_in_a_side_question(self, ctx) -> None:
         questions = [
             *GOOD_QUESTIONS[:2],
