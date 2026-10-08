@@ -17,11 +17,11 @@ More detail: [specification](docs/project_spec.pdf) · [working rules](CLAUDE.md
 | 1. Describe | You | Write a brief: what the data is, what you want to learn, how unclear cases should be handled. | edit a YAML file |
 | 2. Ingest | System (no AI) | Loads the file exactly as it is, profiles every column, masks personal data, and checks the claims in your brief. **Gate 1** stops here if the file was not read faithfully. | `pipeline.ingest` |
 | 3. Diagnose | AI: analyst | Lists the problems to fix and the judgment calls (questions the data cannot answer on its own), and decides those calls from your brief. | `pipeline.agents.analyst` |
-| 4. Check decisions | You (optional) | Change any of the AI's decisions in `decisions.yaml`. | edit a YAML file |
+| 4. Check decisions | You (optional) | Change any of the AI's decisions in `edit/decisions.yaml`. | edit a YAML file |
 | 5. Clean | AI: coder and reviewer | The coder writes a cleaning plan, which runs step by step from the original data. **Gate 2** checks the result. The reviewer checks that it makes sense and can send fixes back, at most twice. | `pipeline.clean` |
-| 6. Plan the analysis | AI: planner | Writes 3–5 questions that serve your goal, each answered with the [analysis tools](#analysis-tools), and marks what this data cannot answer, with the reason. **Gate 3** checks the plan. It is approved automatically; to change it, edit `analysis_plan.yaml`. | `pipeline.agents.planner` |
+| 6. Plan the analysis | AI: planner | Writes 3–5 questions that serve your goal, each answered with the [analysis tools](#analysis-tools), and marks what this data cannot answer, with the reason. **Gate 3** checks the plan. It is approved automatically; to change it, edit `edit/analysis_plan.yaml`. | `pipeline.agents.planner` |
 | 7. Analyse | AI: analysis agent | Runs the plan with the tools in up to three rounds, following up on whatever looks interesting, then writes up what it found: an answer per question and findings that cite the tool results behind them. **Gate 4** checks that every number in the write-up is one a tool reported. | `pipeline.analyze` |
-| 8. Read the report | You | `run_report.pdf` opens with a one-page summary and the headline findings, then the findings in full with their charts, then the whole story of the data: what was wrong, every change (with any code the AI wrote), the checks, the review and the plan. To change a cleaning decision, edit `decisions.yaml` and run step 5 again; to change the analysis, edit `analysis_plan.yaml` and run step 7 again. | – |
+| 8. Read the report | You | `REPORT.pdf`: the answer, how good the data is, the decisions made for you, and a self-critical wrap-up, in three or four pages. Each section links to a detail document. To change a cleaning decision, edit `edit/decisions.yaml` and run step 5 again; to change the analysis, edit `edit/analysis_plan.yaml` and run step 7 again. | – |
 
 Steps 2, 3 and 5–7 run in one go with `pipeline.run`; the separate commands do the same work one step at a time.
 
@@ -66,7 +66,7 @@ uv run pytest
 uv run python -m pipeline.run tests/fixtures/danish_semicolon.csv --brief examples/context_brief.yaml
 ```
 
-It ingests, diagnoses and cleans the file, then plans and runs the analysis, and prints a short summary and where the PDF report is. `runs/index.md` lists every run.
+It ingests, diagnoses and cleans the file, then plans and runs the analysis, and prints a short summary and where `REPORT.pdf` is. `runs/index.md` lists every run.
 
 Or step by step, which does exactly the same:
 
@@ -105,34 +105,52 @@ claims:
 A judgment call is a cleaning question the data cannot answer by itself, where the answer changes the results. For example: does 999 mean "unknown" or a real amount? Should missing ages be filled in?
 
 - **`judgment_calls: decide`** (the default): the analyst decides each call from your brief and `guidance`. When the brief does not settle a call, it takes the option that changes the least and marks it low confidence.
-- **`judgment_calls: ask`**: every call waits for you in `decisions.yaml`.
+- **`judgment_calls: ask`**: every call waits for you in `edit/decisions.yaml`.
 
-Every decision appears in two places:
-- **`decisions.yaml`**, the file you edit.
-- **The top of `cleaning_report.md`**, under "Decided by the AI: check these", least certain first. Each entry shows why it was decided, what it changed (measured), and the alternatives.
+Every decision appears in three places:
+- **`edit/decisions.yaml`**, the file you edit.
+- **`REPORT.pdf`, section 3**: a short table, least certain first.
+- **`details/3_decisions.pdf`**: each decision with its options, reasons, alternatives and what it changed in the data (measured).
 
-**To change a decision,** edit its `decision:` line in `decisions.yaml`. You can write another option, your own words, or `undecided` to leave that data untouched. Then run `pipeline.clean` again. The original data is never modified, so every decision can be undone.
+**To change a decision,** edit its `decision:` line in `edit/decisions.yaml`. You can write another option, your own words, or `undecided` to leave that data untouched. Then run `pipeline.clean` and `pipeline.analyze` again. The original data is never modified, so every decision can be undone.
 
 ## What a run folder contains
 
-| File | Written by | What it is |
+```
+runs/<file>_<date-time>/
+├── REPORT.pdf     ← start here
+├── details/       one document per section of the report
+├── edit/          the two files you change to change the result
+├── data/          the clean data and the rows that were left out
+└── logs/          the machine-readable audit trail
+```
+
+**`REPORT.pdf`** is three or four pages:
+- **In brief:** your question, the answer in a few lines, and the status of every check.
+- **1. What we found:** each question's answer and findings, with a key chart.
+- **2. How good the data is:** rows, problems fixed, what is still missing, and what that means for the findings.
+- **3. Decisions made for you:** every judgment call, who decided it and how sure they were.
+- **4. Wrap-up:** what might be wrong and what we recommend. This comes from the checks, the decisions and the review, plus the analysis's own doubts (marked AI).
+
+Each section ends with a link to its detail document.
+
+| Folder | File | What it is |
 | --- | --- | --- |
-| `ingestion_report.md` / `.xlsx` | ingest | What was read and what was not, column by column, and Gate 1 |
-| `rejected_lines.csv` | ingest | Lines that could not be parsed, in full |
-| `profile_llm.json` | ingest | The masked summary: the only view of the data the AI ever gets |
-| `diagnosis.md` | analyst | The problems found, and the judgment calls with their decisions |
-| `decisions.yaml` | analyst, then you | The decisions on judgment calls; edit to change |
-| `run_report.pdf` | run, clean | **Start here.** A one-page summary, then the dirty data, what was wrong, every change and the AI's code, the checks, the review and the analysis plan. No personal data. |
-| `cleaning_report.md` | clean | The same story in Markdown, with the technical detail |
-| `clean_data.csv` / `.parquet` | clean | The cleaned data, written only when Gate 2 does not block |
-| `handoff.json`, `schema_contract.yaml` | clean | What the clean data is, for you and for later stages |
-| `dropped_rows.csv` | clean | Every removed row, with the reason |
-| `analysis_plan.yaml` | planner, then you | The analysis plan: the questions, their tools, what was left out and why; edit to change |
-| `analysis_plan_ai.json` | planner | The plan exactly as the AI wrote it and Gate 3 passed it |
-| `analysis_report.md` | analysis | The findings in Markdown, with the charts and every tool call |
-| `analysis.json`, `artifacts.json` | analysis | The write-up, every tool call, and every result and finding as a standalone artifact with its audit references |
-| `manifest.json` | every step | Models, prompt versions, cost and the status of each step |
-| `*_log.json`, `gate_*.json`, `cleaning_plan.json` | every step | The full audit trail: every AI attempt, query, step and check |
+| `details/` | `1_analysis.pdf` | Every finding with all its charts and tool results, and the plan behind the analysis |
+| | `2_data_quality.pdf` | The data as received, what was wrong, every change (with any code the AI wrote), the checks, the review |
+| | `2_data_columns.xlsx` | The data as received, column by column, in Excel |
+| | `3_decisions.pdf` | Every decision with its options, reasons, alternatives and measured effect |
+| | `4_audit.pdf` | Models, costs, prompt versions and every file |
+| | `charts/` | Every chart as an image |
+| `edit/` | `decisions.yaml` | The cleaning decisions; change one, then run `pipeline.clean` and `pipeline.analyze` |
+| | `analysis_plan.yaml` | The analysis questions; change them, then run `pipeline.analyze` |
+| `data/` | `clean_data.csv` / `.parquet` | The cleaned data, written only when Gate 2 does not block |
+| | `dropped_rows.csv` | Every row removed while cleaning, with the reason |
+| | `rejected_lines.csv` | Every line of the file that could not be read, in full |
+| `logs/` | `manifest.json` | Models, prompt versions, cost and the status of each step |
+| | everything else | The audit trail: every AI attempt, query, step, check and result, as JSON, plus Markdown versions of each step's report |
+
+Old run folders, from before this layout, are moved into it the first time a command opens them (or all at once with `uv run python -m pipeline.layout runs`). The reports can be rebuilt at any time with `uv run python -m pipeline.reports runs/<folder>`.
 
 `runs/` is not in git, because it can contain your data.
 
@@ -239,7 +257,7 @@ Rules every tool follows:
 | No finding claims more than its evidence | Gate 4 refuses "strong" for a finding that rests only on models doing no better than no model at all |
 | The plan only uses what exists and is allowed | Gate 3 (`checks/plan_gate.py`) checks every column, tool, target and exclusion, and sends problems back to the planner |
 | A column that gives the answer away is left out | Gate 3 tests each column on its own against the target; the planner is told before it plans, and must exclude it |
-| Your edits to the plan are never overwritten | `agents/planner.py` will not plan again over an edited `analysis_plan.yaml` |
+| Your edits to the plan are never overwritten | `agents/planner.py` will not plan again over an edited `edit/analysis_plan.yaml` |
 
 ## Project layout
 
@@ -252,7 +270,8 @@ Rules every tool follows:
 | [pipeline/checks/](pipeline/checks/) | Gates 1 to 4, the reconciliation checks, the schema contract and the number check |
 | [pipeline/tools/](pipeline/tools/) | The reviewer's query tool, the analysis tools (statistics, charts, regressions), and the loader that prepares the clean data for analysis |
 | [pipeline/run.py](pipeline/run.py) | The one command for the whole workflow |
-| [pipeline/report_pdf.py](pipeline/report_pdf.py) | The PDF run report, rebuilt from the run folder (`python -m pipeline.report_pdf runs/<folder>`) |
+| [pipeline/reports/](pipeline/reports/) | `REPORT.pdf` and the detail documents, rebuilt from the run folder (`python -m pipeline.reports runs/<folder>`) |
+| [pipeline/layout.py](pipeline/layout.py) | Where every file of a run folder lives |
 | [pipeline/ingest.py](pipeline/ingest.py), [pipeline/clean.py](pipeline/clean.py), [pipeline/analyze.py](pipeline/analyze.py) | The commands for steps 2, 5 and 6–7 |
 | [benchmark/](benchmark/) | The benchmark: synthetic clean data, the breakers, scenarios, the scorer and the runner |
 | [tests/fixtures/](tests/fixtures/) | Ten deliberately difficult files, with their expected results in [expected.yaml](tests/fixtures/expected.yaml) |
