@@ -1,0 +1,81 @@
+# A brief: tells the pipeline what your data is and what you want to learn.
+#
+# To use it: copy this file (e.g. to briefs/my_data.yaml), fill it in, and run
+#   uv run python -m pipeline.run briefs/my_data.yaml
+#
+# Only data_file, description and goal are needed. Everything else is optional:
+# delete what you do not use. Lines starting with # are comments.
+
+# --- Required ---------------------------------------------------------------
+
+# The data file, relative to the project folder (put the file in data/raw/).
+data_file: data/raw/my_data.csv
+
+# What the data is: what one row is, where it comes from, units.
+description: >
+  One row per ... from ... Amounts are in ...
+
+# What you want to learn. Be specific: this steers the whole analysis.
+goal: >
+  Understand which ... are associated with ...
+
+# --- The outcome -------------------------------------------------------------
+
+# The column you want explained (yes/no or a number). Leave it out to just describe the data.
+target: my_outcome_column
+
+# --- Helpful context -----------------------------------------------------------
+
+# What one row represents, and the ID column if there is one.
+# unit_of_observation: one customer
+# id_column: customer_id
+
+# What you know about columns that the values do not show.
+# column_notes:
+#   - name: my_outcome_column
+#     description: 1 if ..., 0 if not
+#     allowed_values: ["0", "1"]
+#   - name: amount
+#     description: The loan amount
+#     unit: DKK
+#     known_issues: 999 was used for 'unknown' before 2021
+
+# Problems you already know about.
+# known_issues:
+#   - Ages are missing for many rows.
+
+# Groups or themes you especially care about.
+# focus_areas:
+#   - Customers under 25
+
+# Columns that must not be used, e.g. legally sensitive ones.
+# excluded_variables:
+#   - gender
+
+# --- How unclear cases are settled ---------------------------------------------
+
+# decide: the AI settles each judgment call from this brief (shown in the report,
+#         and you can change it in the run's edit/decisions.yaml)
+# ask:    every judgment call waits for you in edit/decisions.yaml
+judgment_calls: decide
+
+# Plain-words guidance for those calls, e.g. "never fill in missing values".
+# guidance: >
+#   Keep every row unless it is clearly broken. Do not fill in missing values.
+
+# --- Statements to check -----------------------------------------------------------
+
+# Things you believe about the data; the pipeline checks each one and reports if the
+# data disagrees. Kinds: column_unique, column_not_null, binary_column, value_range,
+# date_range, row_count, allowed_values, column_exists.
+# claims:
+#   - kind: column_unique
+#     column: customer_id
+#     text: customer_id is unique
+#   - kind: row_count
+#     params:
+#       expected: 10000
+#     text: 10,000 rows
+
+# For an Excel file: which sheet (default: the first one).
+# sheet: Sheet1

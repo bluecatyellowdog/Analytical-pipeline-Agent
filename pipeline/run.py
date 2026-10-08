@@ -1,6 +1,8 @@
 """The whole workflow in one command: ingest, diagnose, clean, plan and run the analysis.
 
-    uv run python -m pipeline.run data/raw/Titanic-Dataset.csv --brief examples/titanic_brief.yaml
+    uv run python -m pipeline.run briefs/telco.yaml
+
+The brief names its data file. A data file with `--brief <brief>` works too.
 
 Runs the steps back to back into one run folder and ends with a short summary
 saying where the report is. It stops early only when a step cannot go on: Gate 1
@@ -228,13 +230,46 @@ def summarise(summary: RunSummary) -> str:
     return "\n".join(lines)
 
 
+class RunInputError(ValueError):
+    """What to run on is unclear, with what to do about it."""
+
+
+BRIEF_SUFFIXES = (".yaml", ".yml")
+
+
+def resolve_inputs(source: str | Path, brief: str | Path | None) -> tuple[Path, Path | None]:
+    """The data file and the brief. Given only a brief, the data file is the one it names."""
+    source = Path(source)
+    if brief is None and source.suffix.lower() in BRIEF_SUFFIXES:
+        data_file = load_context_brief(source).data_file
+        if not data_file:
+            raise RunInputError(
+                f"{source} names no data file. Add a line such as "
+                f"'data_file: data/raw/<your file>.csv' to it, or run with the data file first: "
+                f"python -m pipeline.run <data file> --brief {source.as_posix()}"
+            )
+        data = Path(data_file)
+        if not data.exists():
+            raise RunInputError(
+                f"the data file {data_file} named in {source.as_posix()} was not found "
+                f"(paths are relative to the project folder)"
+            )
+        return data, source
+    return source, Path(brief) if brief is not None else None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m pipeline.run",
-        description="Ingest, diagnose, clean and analyse one file in one go.",
+        description="Ingest, diagnose, clean and analyse one file in one go. "
+        "Usually: python -m pipeline.run briefs/<your brief>.yaml",
     )
-    parser.add_argument("source", help="CSV, Excel, Parquet or JSON file")
-    parser.add_argument("--brief", help="Context brief YAML (see examples/)")
+    parser.add_argument(
+        "source",
+        help="A brief (briefs/<name>.yaml) that names its data file, or a data file "
+        "(CSV, Excel, Parquet or JSON)",
+    )
+    parser.add_argument("--brief", help="The brief, when the first argument is a data file")
     parser.add_argument("--sheet", help="Excel sheet name (default: the first one)")
     parser.add_argument("--out", help="Run folder (default: runs/<file>_<timestamp>)")
     parser.add_argument("--seed", type=int, default=42, help="Seed for profiling samples")
@@ -255,11 +290,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Not configured: {error}")
         return 1
 
-    print(f"Running {args.source} with {client.config.model}. This takes a few minutes...")
+    try:
+        source, brief = resolve_inputs(args.source, args.brief)
+    except (RunInputError, FileNotFoundError, ValueError) as error:
+        print(f"Cannot run: {error}")
+        return 1
+    sheet = args.sheet or (load_context_brief(brief).sheet if brief else None)
+
+    print(f"Running {source} with {client.config.model}. This takes a few minutes...")
     try:
         summary = run_all(
-            args.source,
-            args.brief,
+            source,
+            brief,
             client,
             provider=client.config.public(),
             review_client=review_client,
@@ -267,11 +309,11 @@ def main(argv: list[str] | None = None) -> int:
             reviewing=not args.no_review,
             budget_usd=args.budget,
             out=args.out,
-            sheet=args.sheet,
+            sheet=sheet,
             seed=args.seed,
         )
     except (FileNotFoundError, ValueError) as error:
-        print(f"Cannot run {args.source}: {error}")
+        print(f"Cannot run {source}: {error}")
         return 1
 
     print()

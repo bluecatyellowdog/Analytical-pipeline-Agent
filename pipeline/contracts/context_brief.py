@@ -70,6 +70,12 @@ class ColumnNote(Strict):
 class ContextBrief(Strict):
     """Stage 0 output. Stored in the run manifest and passed to every agent."""
 
+    data_file: str | None = Field(
+        default=None,
+        description="The data file this brief is about, relative to the project folder, e.g. "
+        "data/raw/loans.csv. With it, `pipeline.run <brief>` needs nothing else.",
+    )
+    sheet: str | None = Field(default=None, description="The Excel sheet, for an Excel file.")
     description: str = Field(description="What the rows are and where they come from.")
     goal: str = Field(description="The question or decision the analysis should serve.")
     target: str | None = Field(default=None, description="Target column, if known.")

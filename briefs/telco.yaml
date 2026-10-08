@@ -1,0 +1,60 @@
+# Brief for the Telco Customer Churn data (Kaggle: blastchar/telco-customer-churn).
+# Run it with:  uv run python -m pipeline.run briefs/telco.yaml
+
+data_file: data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv
+
+description: >
+  One row per customer of a telecom company (IBM sample data). Each row shows the
+  services the customer signed up for, their account (contract, billing, payment
+  method, charges, how many months they have been a customer) and demographics.
+  Charges are in dollars.
+
+goal: >
+  Understand which customer characteristics are associated with churn (leaving the
+  company), so the company knows which customers to focus on keeping.
+
+target: Churn
+unit_of_observation: one customer
+id_column: customerID
+
+column_notes:
+  - name: Churn
+    description: Whether the customer left within the last month
+    allowed_values: ["Yes", "No"]
+  - name: tenure
+    description: Number of months the customer has stayed with the company
+    unit: months
+  - name: SeniorCitizen
+    description: 1 if the customer is a senior citizen, 0 if not
+    allowed_values: ["0", "1"]
+  - name: MonthlyCharges
+    description: The amount charged to the customer each month
+    unit: dollars
+  - name: TotalCharges
+    description: The total amount charged to the customer
+    unit: dollars
+  - name: Contract
+    description: Contract term
+    allowed_values: ["Month-to-month", "One year", "Two year"]
+
+focus_areas:
+  - Contract type
+  - New customers (short tenure)
+
+# How unclear cases are settled: decide = the AI decides from this brief (shown in the
+# report, and you can change it); ask = every one waits for you in edit/decisions.yaml.
+judgment_calls: decide
+guidance: >
+  Keep every customer unless a row is clearly broken. Do not fill in missing values.
+
+claims:
+  - kind: column_unique
+    column: customerID
+    text: customerID is unique
+  - kind: binary_column
+    column: Churn
+    text: Churn is yes/no
+  - kind: row_count
+    params:
+      expected: 7043
+    text: 7,043 customers

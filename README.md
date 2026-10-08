@@ -60,13 +60,19 @@ uv run pytest
 
 **2. Add an LLM key.** Copy `.env.example` to `.env` and fill in `LLM_API_KEY=`. Keys from OpenRouter, Anthropic, OpenAI, Gemini, Groq and xAI are recognised automatically.
 
-**3. Run the example**, a small Danish loan file from the test set, in one command:
+**3. Write a brief and run it.** Put your data file in `data/raw/`, copy [briefs/_template.yaml](briefs/_template.yaml) to `briefs/<your name>.yaml`, fill in the data file, what the data is and what you want to learn, and run:
+
+```powershell
+uv run python -m pipeline.run briefs/telco.yaml
+```
+
+It ingests, diagnoses and cleans the file, then plans and runs the analysis, and prints a short summary and where `REPORT.pdf` is. `runs/index.md` lists every run. To run again after changing the brief, run the same command.
+
+You can also give the data file and the brief separately, e.g. the small Danish loan file from the test set:
 
 ```powershell
 uv run python -m pipeline.run tests/fixtures/danish_semicolon.csv --brief examples/context_brief.yaml
 ```
-
-It ingests, diagnoses and cleans the file, then plans and runs the analysis, and prints a short summary and where `REPORT.pdf` is. `runs/index.md` lists every run.
 
 Or step by step, which does exactly the same:
 
@@ -81,9 +87,10 @@ Ingesting is free. The other steps call the LLM: a small dataset costs about $0.
 
 ## The brief
 
-The brief tells the agents what they cannot see in the data. A shortened version of [examples/titanic_brief.yaml](examples/titanic_brief.yaml):
+The brief tells the agents what they cannot see in the data. **Your briefs live in [briefs/](briefs/)**, one per dataset: start from [briefs/_template.yaml](briefs/_template.yaml), which explains every field. Only `data_file`, `description` and `goal` are required. [examples/](examples/) holds sample briefs to learn from. A shortened version of [examples/titanic_brief.yaml](examples/titanic_brief.yaml):
 
 ```yaml
+data_file: data/raw/Titanic-Dataset.csv
 description: One row per passenger on the Titanic's maiden voyage in April 1912.
 goal: Understand which passenger characteristics are associated with survival.
 target: Survived
@@ -175,7 +182,7 @@ Command options:
 - `pipeline.clean` and `pipeline.run`:
   - `--budget` (default $0.50) stops between review rounds once cleaning has spent that much
   - `--no-review` skips the reviewer
-- `pipeline.run` also takes `--brief`, `--sheet`, `--out` and `--seed`, as ingest does
+- `pipeline.run` takes a brief that names its data file (`briefs/<name>.yaml`), or a data file with `--brief`; also `--sheet`, `--out` and `--seed`, as ingest does
 
 ## Measuring it: the benchmark
 
@@ -273,6 +280,7 @@ Rules every tool follows:
 | [pipeline/agents/](pipeline/agents/) | The LLM client and the diagnostic, coder, reviewer, planner and analysis agents, with their prompts |
 | [pipeline/checks/](pipeline/checks/) | Gates 1 to 4, the reconciliation checks, the schema contract and the number check |
 | [pipeline/tools/](pipeline/tools/) | The reviewer's query tool, the analysis tools (statistics, charts, regressions), and the loader that prepares the clean data for analysis |
+| [briefs/](briefs/) | Your briefs, one per dataset, and the template |
 | [pipeline/run.py](pipeline/run.py) | The one command for the whole workflow |
 | [pipeline/reports/](pipeline/reports/) | `REPORT.pdf` and the detail documents, rebuilt from the run folder (`python -m pipeline.reports runs/<folder>`) |
 | [pipeline/layout.py](pipeline/layout.py) | Where every file of a run folder lives |
