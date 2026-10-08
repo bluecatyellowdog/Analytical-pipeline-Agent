@@ -1,6 +1,6 @@
 """decisions.yaml: the AI's choices pre-filled, the user's edits recognised as theirs.
 
-In decide mode the analyst settles every judgment call; the file shows each
+In decide mode the diagnostic agent settles every judgment call; the file shows each
 choice with who made it, how sure it was and why. Editing a decision makes it
 the user's; writing `undecided` leaves that data alone. Nothing the user wrote
 is ever overwritten.

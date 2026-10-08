@@ -1,4 +1,4 @@
-"""The analyst agent: reads the masked profile and the brief, returns a checked diagnosis.
+"""The diagnostic agent: reads the masked profile and the brief, returns a checked diagnosis.
 
 Every test uses FakeLLM, so nothing here touches the network or costs money.
 What is pinned down: the prompt carries the brief and the masked profile and no
@@ -12,8 +12,8 @@ import json
 
 import pytest
 
-from pipeline.agents.analyst import (
-    AnalystError,
+from pipeline.agents.diagnostic import (
+    DiagnosisError,
     build_messages,
     check_diagnosis,
     diagnose,
@@ -213,7 +213,7 @@ class TestDiagnose:
 
     def test_it_gives_up_after_two_retries(self, profile_llm, brief) -> None:
         llm = FakeLLM(["nope", "still nope", "nope again", "never asked"])
-        with pytest.raises(AnalystError) as error:
+        with pytest.raises(DiagnosisError) as error:
             diagnose(profile_llm, brief, llm)
         assert len(error.value.attempts) == 3
         assert len(llm.calls) == 3

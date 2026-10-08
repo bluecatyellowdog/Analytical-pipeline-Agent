@@ -73,7 +73,7 @@ STEP_NAMES = {
 }
 STOP_ADVICE = {
     "ingestion": "Fix the problems listed in details/2_data_quality.pdf (section 1) and run again.",
-    "diagnosis": "See logs/analyst_log.json for what went wrong, then run again.",
+    "diagnosis": "See logs/diagnostic_log.json for what went wrong, then run again.",
     "cleaning": "See details/2_data_quality.pdf (section 4); change a decision in "
     "edit/decisions.yaml if needed and clean again.",
     "planning": "See logs/gate_3.json; edit edit/analysis_plan.yaml, or delete it, and run "

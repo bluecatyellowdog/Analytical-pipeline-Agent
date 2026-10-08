@@ -37,6 +37,9 @@ from pipeline.reports.common import (
     title_block,
 )
 
+OLD_NAMES = {"diagnostic": "analyst"}
+"""Agent names before a rename, so older runs still show their models."""
+
 
 def _received(run: Run) -> list:
     load, info = run.load, run.load.get("file", {})
@@ -484,15 +487,17 @@ def _audit(run: Run) -> list:
     costs = run.costs()
     rows = [["Agent", "Model", "Prompt version", "Calls", "Cost"]]
     calls = {
-        "analyst": len((run.analyst_log or {}).get("attempts", [])),
+        "diagnostic": len((run.diagnostic_log or {}).get("attempts", [])),
         "coder": len((run.coder_log or {}).get("attempts", [])),
         "reviewer": sum(len(r.get("attempts", [])) for r in (run.review or {}).get("rounds", [])),
         "planner": len((run.planner_log or {}).get("attempts", [])),
         "analysis": len((run.analysis_log or {}).get("attempts", [])),
     }
-    for agent in ("analyst", "coder", "reviewer", "planner", "analysis"):
-        model = manifest.get("models", {}).get(agent, {}).get("name", "-")
-        version = manifest.get("prompt_versions", {}).get(agent, "-")
+    for agent in ("diagnostic", "coder", "reviewer", "planner", "analysis"):
+        models = manifest.get("models", {})
+        model = (models.get(agent) or models.get(OLD_NAMES.get(agent, ""), {})).get("name", "-")
+        versions = manifest.get("prompt_versions", {})
+        version = versions.get(agent) or versions.get(OLD_NAMES.get(agent, ""), "-")
         rows.append([agent, model, version, str(calls[agent]), f"${costs[agent]:.4f}"])
     facts = [
         ["Run", manifest.get("run_id", "")],

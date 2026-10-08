@@ -228,3 +228,8 @@ Format: choice, alternatives, reason. Newest at the bottom.
 - **Measured effect per decision:** the decisions document shows what each decision changed in the data, counted only in the decision's own column. One cleaning step can carry out several decisions, and the first version credited a whole step to one of them ("866 values changed" for 2 missing ports).
 - **Alternatives:** one long PDF with appendices and internal links (always clickable, but long); HTML pages (natural links, but the user asked for PDF); keeping the flat folder.
 - **Reason:** the user wanted one document that is easy to read, with the depth one click away. The first real report put the answer on page 1 and stayed at 3-4 pages for Titanic, while the detail documents keep everything the old 24-page report had.
+
+## D037 -- The "analyst" agent is renamed the diagnostic agent
+- **Choice, asked for by the user:** the first agent, which diagnoses the data (issues and judgment calls), is now the diagnostic agent: `pipeline/agents/diagnostic.py`, `prompts/diagnostic.md`, `logs/diagnostic_log.json`, and "diagnostic" in the manifest. The command is `python -m pipeline.agents.diagnostic`.
+- **Reason:** "analyst" next to the analysis agent was confusing, and the job is diagnosis, not analysis. The analysis agent keeps "analyst" in its own prompt, because that is what it is.
+- **Older runs:** the reports still read `analyst_log.json` and the manifest's "analyst" entries, so earlier runs show their models and costs. Entries above that say "analyst" mean this agent.

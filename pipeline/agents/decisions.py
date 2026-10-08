@@ -1,12 +1,12 @@
 """The decisions on judgment calls, as a file the user can read and change in the run folder.
 
-When the brief says `judgment_calls: decide` (the default), the analyst settles
+When the brief says `judgment_calls: decide` (the default), the diagnostic agent settles
 each call from the brief and the file is pre-filled with its choices: `ai_choice`
 records what the AI chose, `decision` is what will be carried out. Changing a
 `decision` makes it the user's; writing `undecided` leaves that data untouched.
 With `judgment_calls: ask`, every call starts as `undecided` and waits for the user.
 
-The file is the user's: re-running the analyst refreshes the AI's choices but
+The file is the user's: re-running the diagnosis refreshes the AI's choices but
 never an answer the user changed.
 """
 
@@ -23,7 +23,7 @@ from pipeline.contracts.diagnosis import Diagnosis, JudgmentCall
 DECISIONS_FILE = "decisions.yaml"
 
 HEADER_ASK = """\
-# Your decisions on the analyst's judgment calls.
+# Your decisions on the judgment calls from the diagnosis.
 #
 # For each one, replace `undecided` with your choice: copy one of the options,
 # or write your own in plain words. Calls left `undecided` are not touched by
@@ -34,7 +34,7 @@ HEADER_ASK = """\
 """
 
 HEADER_DECIDE = """\
-# Decisions on the analyst's judgment calls.
+# Decisions on the judgment calls from the diagnosis.
 #
 # The AI decided each call from your brief (judgment_calls: decide). `ai_choice`
 # is what it chose; `decision` is what the cleaning carries out. Its reasons, how

@@ -16,7 +16,7 @@ More detail: [specification](docs/project_spec.pdf) · [working rules](CLAUDE.md
 | --- | --- | --- | --- |
 | 1. Describe | You | Write a brief: what the data is, what you want to learn, how unclear cases should be handled. | edit a YAML file |
 | 2. Ingest | System (no AI) | Loads the file exactly as it is, profiles every column, masks personal data, and checks the claims in your brief. **Gate 1** stops here if the file was not read faithfully. | `pipeline.ingest` |
-| 3. Diagnose | AI: analyst | Lists the problems to fix and the judgment calls (questions the data cannot answer on its own), and decides those calls from your brief. | `pipeline.agents.analyst` |
+| 3. Diagnose | AI: diagnostic agent | Lists the problems to fix and the judgment calls (questions the data cannot answer on its own), and decides those calls from your brief. | `pipeline.agents.diagnostic` |
 | 4. Check decisions | You (optional) | Change any of the AI's decisions in `edit/decisions.yaml`. | edit a YAML file |
 | 5. Clean | AI: coder and reviewer | The coder writes a cleaning plan, which runs step by step from the original data. **Gate 2** checks the result. The reviewer checks that it makes sense and can send fixes back, at most twice. | `pipeline.clean` |
 | 6. Plan the analysis | AI: planner | Writes 3–5 questions that serve your goal, each answered with the [analysis tools](#analysis-tools), and marks what this data cannot answer, with the reason. **Gate 3** checks the plan. It is approved automatically; to change it, edit `edit/analysis_plan.yaml`. | `pipeline.agents.planner` |
@@ -72,7 +72,7 @@ Or step by step, which does exactly the same:
 
 ```powershell
 uv run python -m pipeline.ingest tests/fixtures/danish_semicolon.csv --brief examples/context_brief.yaml
-uv run python -m pipeline.agents.analyst runs/<run folder>
+uv run python -m pipeline.agents.diagnostic runs/<run folder>
 uv run python -m pipeline.clean runs/<run folder>
 uv run python -m pipeline.analyze runs/<run folder>
 ```
@@ -104,7 +104,7 @@ claims:
 
 A judgment call is a cleaning question the data cannot answer by itself, where the answer changes the results. For example: does 999 mean "unknown" or a real amount? Should missing ages be filled in?
 
-- **`judgment_calls: decide`** (the default): the analyst decides each call from your brief and `guidance`. When the brief does not settle a call, it takes the option that changes the least and marks it low confidence.
+- **`judgment_calls: decide`** (the default): the diagnostic agent decides each call from your brief and `guidance`. When the brief does not settle a call, it takes the option that changes the least and marks it low confidence.
 - **`judgment_calls: ask`**: every call waits for you in `edit/decisions.yaml`.
 
 Every decision appears in three places:
@@ -266,7 +266,7 @@ Rules every tool follows:
 | [pipeline/contracts/](pipeline/contracts/) | The data passed between steps, as validated models. Their validators enforce the audit rules. |
 | [pipeline/ingestion/](pipeline/ingestion/) | Loading, profiling, personal-data detection and masking, and claim checks |
 | [pipeline/ops/](pipeline/ops/) | 15 library operations, the sandboxed `custom_code` operation, and the plan executor |
-| [pipeline/agents/](pipeline/agents/) | The LLM client and the analyst, coder, reviewer, planner and analysis agents, with their prompts |
+| [pipeline/agents/](pipeline/agents/) | The LLM client and the diagnostic, coder, reviewer, planner and analysis agents, with their prompts |
 | [pipeline/checks/](pipeline/checks/) | Gates 1 to 4, the reconciliation checks, the schema contract and the number check |
 | [pipeline/tools/](pipeline/tools/) | The reviewer's query tool, the analysis tools (statistics, charts, regressions), and the loader that prepares the clean data for analysis |
 | [pipeline/run.py](pipeline/run.py) | The one command for the whole workflow |
@@ -282,7 +282,7 @@ Rules every tool follows:
 | --- | --- |
 | 0. Contracts and setup | Done, except tracing and the GitHub Pages workflow |
 | 1. Deterministic foundation | Done |
-| 2. Cleaning agents | Mostly done: analyst, coder, Gate 2, reviewer and AI decisions run end to end. Left: canary rows and a run on five public datasets. |
+| 2. Cleaning agents | Mostly done: diagnostic agent, coder, Gate 2, reviewer and AI decisions run end to end. Left: canary rows and a run on five public datasets. |
 | 3. Corruption benchmark | In progress: synthetic data, breakers, scorer and runner built; first results in; real messy datasets to come |
 | 4. Analysis planning and your approval | Done: the planner, Gate 3 and automatic approval; edit the plan and run `pipeline.analyze` to change it |
 | 5. Analysis agent | Done: the tools, the agent, Gate 4 and the findings in the PDF. Left: looking inside one subgroup, or crossing two groupings |

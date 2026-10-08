@@ -148,7 +148,10 @@ class Run:
         self.gate_2 = load_json(run_dir, "gate_2.json")
         self.handoff = load_json(run_dir, "handoff.json")
         self.review = load_json(run_dir, "review_log.json")
-        self.analyst_log = load_json(run_dir, "analyst_log.json")
+        self.diagnostic_log = load_json(run_dir, "diagnostic_log.json") or load_json(
+            run_dir,
+            "analyst_log.json",  # the name before the rename
+        )
         self.coder_log = load_json(run_dir, "coder_log.json")
         self.analysis = load_json(run_dir, "analysis.json")
         self.analysis_plan = (self.analysis or {}).get("plan") or load_json(
@@ -188,7 +191,7 @@ class Run:
             review = sum(total(r.get("attempts")) for r in self.review.get("rounds", []))
             review += total(self.review.get("failed_attempts"))
         return {
-            "analyst": total((self.analyst_log or {}).get("attempts")),
+            "diagnostic": total((self.diagnostic_log or {}).get("attempts")),
             "coder": total((self.coder_log or {}).get("attempts")),
             "reviewer": review,
             "planner": total((self.planner_log or {}).get("attempts")),

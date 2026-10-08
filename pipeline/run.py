@@ -4,7 +4,7 @@
 
 Runs the steps back to back into one run folder and ends with a short summary
 saying where the report is. It stops early only when a step cannot go on: Gate 1
-blocks the file (before any LLM call, so it costs nothing), the analyst gives no
+blocks the file (before any LLM call, so it costs nothing), the diagnosis gives no
 usable diagnosis, the coder no plan that runs, no analysis plan passes Gate 3,
 or no write-up passes Gate 4. When Gate 2 keeps the clean data back, there is
 nothing to analyse. Each step is the same code as its own command, so the run
@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from pipeline import clean
-from pipeline.agents import analysis, analyst, planner
+from pipeline.agents import analysis, diagnostic, planner
 from pipeline.agents.coder import CoderError
 from pipeline.agents.decisions import DecisionsError
 from pipeline.agents.llm import LLMClient, LLMConfigError, connect
@@ -40,7 +40,7 @@ class RunSummary:
     stopped_at: str | None = None
     """'ingest', 'diagnosis', 'cleaning', 'planning' or 'analysis' when a step could not go on."""
     reason: str | None = None
-    diagnosis: analyst.AnalystResult | None = None
+    diagnosis: diagnostic.DiagnosisResult | None = None
     cleaning: clean.CleaningOutcome | None = None
     planning: planner.PlannerResult | None = None
     analysis: analysis.AnalysisResult | None = None
@@ -97,10 +97,10 @@ def _run_steps(
         return summary
 
     try:
-        summary.diagnosis = analyst.run_on_folder(run_dir, client, provider)
-    except analyst.AnalystError as error:
+        summary.diagnosis = diagnostic.run_on_folder(run_dir, client, provider)
+    except diagnostic.DiagnosisError as error:
         summary.stopped_at = "diagnosis"
-        summary.reason = f"{error} Every attempt is logged in {analyst.ANALYST_LOG}."
+        summary.reason = f"{error} Every attempt is logged in {diagnostic.DIAGNOSTIC_LOG}."
         return summary
 
     try:

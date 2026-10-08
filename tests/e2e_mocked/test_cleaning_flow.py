@@ -1,6 +1,6 @@
 """Stage 2 on a real run folder, with every LLM mocked.
 
-ingest -> analyst (writes decisions.yaml) -> the user decides -> pipeline.clean:
+ingest -> diagnosis (writes decisions.yaml) -> the user decides -> pipeline.clean:
 the coder plans and runs, Gate 2 checks, the reviewer judges and may send fixes
 back. What is pinned down: the files a user is told to open exist and say what
 happened, the manifest records every agent and its cost, the review loop ends
@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 from pipeline import clean
-from pipeline.agents import analyst
+from pipeline.agents import diagnostic
 from pipeline.agents.coder import CoderError
 from pipeline.agents.decisions import DECISIONS_FILE, DecisionsError
 from pipeline.agents.llm import FakeLLM
@@ -98,7 +98,7 @@ def run_dir(fixtures_dir, tmp_path):
 
 
 def diagnose(folder) -> None:
-    analyst.run_on_folder(folder, FakeLLM([DIAGNOSIS.model_dump_json()]), PROVIDER)
+    diagnostic.run_on_folder(folder, FakeLLM([DIAGNOSIS.model_dump_json()]), PROVIDER)
 
 
 def decide(folder, **choices) -> None:
@@ -162,7 +162,7 @@ class TestCleaning:
 
         manifest = manifest_of(folder)
         assert manifest["stage_status"]["cleaning"] == "done"
-        assert set(manifest["models"]) == {"analyst", "coder"}
+        assert set(manifest["models"]) == {"diagnostic", "coder"}
         assert manifest["cost"]["calls"] == 2
 
         report = report_of(folder)
@@ -295,7 +295,7 @@ class TestReview:
 class TestRefusals:
     def test_cleaning_needs_a_diagnosis_first(self, run_dir) -> None:
         folder, _ = run_dir
-        with pytest.raises(clean.RunFolderError, match="analyst"):
+        with pytest.raises(clean.RunFolderError, match="diagnosis"):
             run_clean(folder, [])
 
     def test_a_source_file_that_changed_since_ingestion_is_refused(self, run_dir) -> None:
@@ -313,7 +313,7 @@ class TestRefusals:
         with pytest.raises(DecisionsError, match="J9"):
             run_clean(folder, [])
 
-    def test_running_the_analyst_again_keeps_the_users_decisions(self, run_dir) -> None:
+    def test_running_the_diagnosis_again_keeps_the_users_decisions(self, run_dir) -> None:
         folder, _ = run_dir
         diagnose(folder)
         decide(folder, J1="Keep 999")
@@ -351,7 +351,7 @@ class TestAIDecisions:
             judgment_calls="decide",
             guidance="999 always means unknown.",
         )
-        analyst.run_on_folder(folder, FakeLLM([ai_decided().model_dump_json()]), PROVIDER)
+        diagnostic.run_on_folder(folder, FakeLLM([ai_decided().model_dump_json()]), PROVIDER)
         return folder
 
     def test_the_report_shows_every_ai_decision_least_certain_first(self, deciding) -> None:

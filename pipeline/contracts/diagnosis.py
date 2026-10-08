@@ -1,4 +1,4 @@
-"""The analyst agent's output: what is wrong with the data and what it should become.
+"""The diagnostic agent's output: what is wrong with the data and what it should become.
 
 The diagnosis changes nothing. It is the brief the coder agent works from, and
 the record of *why* each later change was made. Clear errors go in `issues`;
@@ -52,7 +52,9 @@ class Alternative(Strict):
     """An option the AI did not choose, and what choosing it would have changed."""
 
     option: str
-    effect: str = Field(min_length=1, description="The analyst's estimate, not a measurement.")
+    effect: str = Field(
+        min_length=1, description="The diagnostic agent's estimate, not a measurement."
+    )
 
 
 class AIDecision(Strict):
@@ -64,7 +66,7 @@ class AIDecision(Strict):
         min_length=1, description="What in the brief, the guidance or the profile decided it."
     )
     expected_effect: str = Field(
-        min_length=1, description="What the choice will change, as the analyst expects it."
+        min_length=1, description="What the choice will change, as the diagnostic agent expects it."
     )
     least_destructive: bool = Field(
         description="True when the brief did not settle the call, so the option that changes "

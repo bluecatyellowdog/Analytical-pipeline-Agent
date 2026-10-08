@@ -1,4 +1,4 @@
-"""The analyst agent: masked profile + brief in, checked diagnosis out. Changes nothing.
+"""The diagnostic agent: masked profile + brief in, checked diagnosis out. Changes nothing.
 
 The LLM proposes; deterministic checks decide whether the proposal is usable.
 A reply is parsed into `Diagnosis`, then checked against the actual columns and
@@ -6,7 +6,7 @@ the brief (every column covered, target and exclusions respected, target never
 imputed, suggested ops exist). Problems go back to the model, at most twice.
 Every attempt is logged with its model, tokens, cost and problems.
 
-    uv run python -m pipeline.agents.analyst runs/<run folder>
+    uv run python -m pipeline.agents.diagnostic runs/<run folder>
 """
 
 from __future__ import annotations
@@ -43,13 +43,13 @@ from pipeline.contracts.diagnosis import Diagnosis
 from pipeline.layout import run_file, upgrade_layout
 from pipeline.ops import REGISTRY, op_names
 
-PROMPT_PATH = Path(__file__).parent / "prompts" / "analyst.md"
+PROMPT_PATH = Path(__file__).parent / "prompts" / "diagnostic.md"
 DIAGNOSIS_JSON = "diagnosis.json"
 DIAGNOSIS_MD = "diagnosis.md"
-ANALYST_LOG = "analyst_log.json"
+DIAGNOSTIC_LOG = "diagnostic_log.json"
 
 
-class AnalystError(RuntimeError):
+class DiagnosisError(RuntimeError):
     """No usable diagnosis after the allowed retries."""
 
     def __init__(self, message: str, attempts: list[Attempt]) -> None:
@@ -58,7 +58,7 @@ class AnalystError(RuntimeError):
 
 
 @dataclass
-class AnalystResult:
+class DiagnosisResult:
     diagnosis: Diagnosis
     attempts: list[Attempt]
     prompt_version: str
@@ -173,7 +173,7 @@ def diagnose(
     client: LLMClient,
     *,
     max_retries: int = MAX_RETRIES,
-) -> AnalystResult:
+) -> DiagnosisResult:
     """Ask, check, and send problems back until the diagnosis is usable or retries run out."""
     messages = build_messages(profile_llm, brief)
     attempts: list[Attempt] = []
@@ -191,7 +191,7 @@ def diagnose(
             attempt.problems = [str(error)]
 
         if not attempt.problems:
-            return AnalystResult(diagnosis, attempts, prompt_version())
+            return DiagnosisResult(diagnosis, attempts, prompt_version())
 
         attempt.feedback = (
             "The diagnosis cannot be used yet:\n"
@@ -204,7 +204,7 @@ def diagnose(
             {"role": "user", "content": attempt.feedback},
         ]
 
-    raise AnalystError(
+    raise DiagnosisError(
         f"no usable diagnosis after {len(attempts)} attempts; "
         f"last problems: {attempts[-1].problems}",
         attempts,
@@ -247,7 +247,7 @@ def _without_ai_decisions(diagnosis: Diagnosis) -> Diagnosis:
     return diagnosis.model_copy(update={"judgment_calls": calls})
 
 
-def render_markdown(diagnosis: Diagnosis, result: AnalystResult | None = None) -> str:
+def render_markdown(diagnosis: Diagnosis, result: DiagnosisResult | None = None) -> str:
     """A readable version for the run folder."""
     lines = ["# Diagnosis", "", diagnosis.summary, ""]
 
@@ -317,7 +317,7 @@ def render_markdown(diagnosis: Diagnosis, result: AnalystResult | None = None) -
     return "\n".join(lines) + "\n"
 
 
-def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) -> AnalystResult:
+def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) -> DiagnosisResult:
     """Diagnose an ingestion run folder and write the results next to it."""
     upgrade_layout(run_dir)
     profile_llm = json.loads(run_file(run_dir, "profile_llm.json").read_text(encoding="utf-8"))
@@ -325,9 +325,9 @@ def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) ->
 
     try:
         result = diagnose(profile_llm, manifest.context_brief, client)
-    except AnalystError as error:
-        write_attempt_log(run_file(run_dir, ANALYST_LOG), error.attempts, prompt_version())
-        record_in_manifest(manifest, "analyst", provider, error.attempts, prompt_version())
+    except DiagnosisError as error:
+        write_attempt_log(run_file(run_dir, DIAGNOSTIC_LOG), error.attempts, prompt_version())
+        record_in_manifest(manifest, "diagnostic", provider, error.attempts, prompt_version())
         manifest.stage_status["diagnosis"] = "blocked"
         save_manifest(run_dir, manifest)
         raise
@@ -339,9 +339,9 @@ def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) ->
         render_markdown(result.diagnosis, result), encoding="utf-8"
     )
     write_template(run_file(run_dir, DECISIONS_FILE), result.diagnosis)
-    write_attempt_log(run_file(run_dir, ANALYST_LOG), result.attempts, result.prompt_version)
+    write_attempt_log(run_file(run_dir, DIAGNOSTIC_LOG), result.attempts, result.prompt_version)
 
-    record_in_manifest(manifest, "analyst", provider, result.attempts, result.prompt_version)
+    record_in_manifest(manifest, "diagnostic", provider, result.attempts, result.prompt_version)
     manifest.stage_status["diagnosis"] = "done"
     save_manifest(run_dir, manifest)
     return result
@@ -349,7 +349,7 @@ def run_on_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) ->
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m pipeline.agents.analyst",
+        prog="python -m pipeline.agents.diagnostic",
         description="Diagnose an ingested dataset with the LLM. Changes no data.",
     )
     parser.add_argument("run_dir", help="An ingestion run folder, e.g. runs/danish_semicolon_...")
@@ -368,8 +368,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Asking {client.config.model} for a diagnosis...")
     try:
         result = run_on_folder(run_dir, client, client.config.public())
-    except AnalystError as error:
-        print(f"\n{error}\nEvery attempt is logged in {run_file(run_dir, ANALYST_LOG).resolve()}")
+    except DiagnosisError as error:
+        print(
+            f"\n{error}\nEvery attempt is logged in {run_file(run_dir, DIAGNOSTIC_LOG).resolve()}"
+        )
         return 1
 
     print()

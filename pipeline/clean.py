@@ -26,7 +26,6 @@ from typing import Any
 
 import yaml
 
-from pipeline.agents.analyst import DIAGNOSIS_JSON
 from pipeline.agents.coder import CoderError, CoderResult, rerun, write_and_run
 from pipeline.agents.coder import prompt_version as coder_prompt_version
 from pipeline.agents.common import (
@@ -38,6 +37,7 @@ from pipeline.agents.common import (
     write_attempt_log,
 )
 from pipeline.agents.decisions import DECISIONS_FILE, DecisionsError, load_decisions
+from pipeline.agents.diagnostic import DIAGNOSIS_JSON
 from pipeline.agents.llm import LLMClient, LLMConfigError, connect
 from pipeline.agents.reviewer import (
     ReviewerError,
@@ -128,8 +128,8 @@ def load_inputs(run_dir: Path) -> FolderInputs:
         )
     if not run_file(run_dir, DIAGNOSIS_JSON).exists():
         raise RunFolderError(
-            "there is no diagnosis yet. Run the analyst first:\n"
-            f"  uv run python -m pipeline.agents.analyst {run_dir.as_posix()}"
+            "there is no diagnosis yet. Run the diagnosis first:\n"
+            f"  uv run python -m pipeline.agents.diagnostic {run_dir.as_posix()}"
         )
     if not manifest.inputs:
         raise RunFolderError("the manifest records no input file")
@@ -908,7 +908,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m pipeline.clean",
         description="Clean a diagnosed run folder: coder, Gate 2, reviewer.",
     )
-    parser.add_argument("run_dir", help="A run folder the analyst has diagnosed")
+    parser.add_argument("run_dir", help="A diagnosed run folder")
     parser.add_argument("--no-review", action="store_true", help="Skip the reviewer")
     parser.add_argument(
         "--budget",
