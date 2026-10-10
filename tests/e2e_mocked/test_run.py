@@ -58,7 +58,7 @@ def test_one_command_runs_all_three_steps(workspace) -> None:
     llm = FakeLLM(
         [DIAGNOSIS.model_dump_json(), plan_json(), FIXTURE_PLAN_REPLY, *FIXTURE_ANALYSIS_REPLIES]
     )
-    summary = run_all("loans.csv", "brief.yaml", llm, review_client=FakeLLM([VERDICT]))
+    summary = run_all("loans.csv", "brief.yaml", llm, clients={"reviewer": FakeLLM([VERDICT])})
 
     assert summary.stopped_at is None
     folder = summary.run_dir
@@ -88,11 +88,31 @@ def test_one_command_runs_all_three_steps(workspace) -> None:
     assert summary.planning.plan.approved_by == "auto"
 
 
+def test_each_agent_runs_on_its_own_model(workspace) -> None:
+    """settings.yaml gives agents their own models; the manifest records which one ran."""
+    clients = {
+        "diagnostic": FakeLLM([DIAGNOSIS.model_dump_json()], model="m-diagnostic"),
+        "coder": FakeLLM([plan_json()], model="m-coder"),
+        "reviewer": FakeLLM([VERDICT], model="m-reviewer"),
+        "planner": FakeLLM([FIXTURE_PLAN_REPLY], model="m-planner"),
+        "analysis": FakeLLM(list(FIXTURE_ANALYSIS_REPLIES), model="m-analysis"),
+    }
+    unused = FakeLLM([])
+    summary = run_all("loans.csv", "brief.yaml", unused, clients=clients)
+
+    assert summary.stopped_at is None
+    assert unused.calls == []
+    manifest = json.loads(run_file(summary.run_dir, "manifest.json").read_text(encoding="utf-8"))
+    assert {agent: info["name"] for agent, info in manifest["models"].items()} == {
+        agent: f"m-{agent}" for agent in clients
+    }
+
+
 def test_the_index_links_the_report(workspace) -> None:
     llm = FakeLLM(
         [DIAGNOSIS.model_dump_json(), plan_json(), FIXTURE_PLAN_REPLY, *FIXTURE_ANALYSIS_REPLIES]
     )
-    summary = run_all("loans.csv", "brief.yaml", llm, review_client=FakeLLM([VERDICT]))
+    summary = run_all("loans.csv", "brief.yaml", llm, clients={"reviewer": FakeLLM([VERDICT])})
     index = (workspace / "runs" / "index.md").read_text(encoding="utf-8")
     assert f"{summary.run_dir.name}/{REPORT_PDF}" in index
 
@@ -111,7 +131,7 @@ def test_the_summary_says_where_to_look(workspace) -> None:
     llm = FakeLLM(
         [DIAGNOSIS.model_dump_json(), plan_json(), FIXTURE_PLAN_REPLY, *FIXTURE_ANALYSIS_REPLIES]
     )
-    summary = run_all("loans.csv", "brief.yaml", llm, review_client=FakeLLM([VERDICT]))
+    summary = run_all("loans.csv", "brief.yaml", llm, clients={"reviewer": FakeLLM([VERDICT])})
     text = summarise(summary)
 
     for expected in (

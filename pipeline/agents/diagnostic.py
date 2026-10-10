@@ -36,7 +36,7 @@ from pipeline.agents.common import (
     write_attempt_log,
 )
 from pipeline.agents.decisions import DECISIONS_FILE, write_template
-from pipeline.agents.llm import LLMClient, LLMConfigError, Message, connect
+from pipeline.agents.llm import LLMClient, LLMConfigError, Message, connect_agent
 from pipeline.checks.schema import type_fits
 from pipeline.contracts.context_brief import ContextBrief
 from pipeline.contracts.diagnosis import Diagnosis
@@ -360,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{run_dir} is not an ingestion run folder (no profile_llm.json).")
         return 1
     try:
-        client = connect()
+        client = connect_agent("diagnostic")
     except LLMConfigError as error:
         print(f"Not configured: {error}")
         return 1

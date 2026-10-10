@@ -9,10 +9,13 @@ recognised from the key's prefix; `LLM_BASE_URL` and `LLM_MODEL` override it.
     LLM_MODEL=anthropic/claude-opus-5.5   # optional where a default exists
     LLM_BASE_URL=http://localhost:11434/v1  # optional, for anything else
 
+Which model each agent uses is set in settings.yaml (`connect_agents`); LLM_MODEL
+is the fallback for an agent it names no model for.
+
 This module only moves text. What the text may contain (masked profiles,
 never raw rows) is enforced where prompts are built, not here.
 
-    uv run python -m pipeline.agents.llm     # check the key works
+    uv run python -m pipeline.agents.llm     # check the key and every model work
 """
 
 from __future__ import annotations
@@ -22,6 +25,14 @@ import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
+
+from pipeline.contracts.settings import (
+    AGENTS,
+    AgentName,
+    Settings,
+    SettingsError,
+    load_settings,
+)
 
 Message = dict[str, str]
 """{'role': 'system' | 'user' | 'assistant', 'content': '...'}"""
@@ -180,25 +191,97 @@ def connect(
     return OpenAICompatibleClient(config)
 
 
+def model_for(agent: AgentName, settings: Settings, env: Mapping[str, str]) -> str | None:
+    """The agent's own line in settings.yaml, else (reviewer only) LLM_REVIEW_MODEL, else the
+    settings' default. None leaves it to connect(): LLM_MODEL, then the provider's default."""
+    own = getattr(settings.models, agent)
+    if own:
+        return own
+    if agent == "reviewer":
+        review_model = (env.get("LLM_REVIEW_MODEL") or "").strip()
+        if review_model:
+            return review_model
+    return settings.models.default
+
+
+def connect_agents(
+    env: Mapping[str, str] | None = None, settings: Settings | None = None
+) -> dict[AgentName, OpenAICompatibleClient]:
+    """One client per agent, each on the model settings.yaml gives it."""
+    if env is None:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        env = os.environ
+    if settings is None:
+        try:
+            settings = load_settings()
+        except SettingsError as error:
+            raise LLMConfigError(str(error)) from error
+    by_model: dict[str | None, OpenAICompatibleClient] = {}
+    clients: dict[AgentName, OpenAICompatibleClient] = {}
+    for agent in AGENTS:
+        model = model_for(agent, settings, env)
+        if model not in by_model:
+            by_model[model] = connect(env, model=model)
+        clients[agent] = by_model[model]
+    return clients
+
+
+def connect_agent(agent: AgentName) -> OpenAICompatibleClient:
+    """The client for one agent, for the commands that run a single step."""
+    return connect_agents()[agent]
+
+
+def describe_models(clients: Mapping[str, OpenAICompatibleClient]) -> str:
+    """'diagnostic, analysis: <model> | coder, reviewer, planner: <model>', in running order."""
+    groups: dict[str, list[str]] = {}
+    for agent, client in clients.items():
+        groups.setdefault(client.config.model, []).append(agent)
+    return " | ".join(f"{', '.join(agents)}: {model}" for model, agents in groups.items())
+
+
+def public_info(client: LLMClient, fallback: dict[str, str] | None = None) -> dict[str, str]:
+    """What the manifest records about a client (never the key); `fallback` for test fakes."""
+    config = getattr(client, "config", None)
+    return config.public() if isinstance(config, LLMConfig) else dict(fallback or {})
+
+
 def main() -> int:
     try:
-        client = connect()
+        clients = connect_agents()
     except LLMConfigError as error:
         print(f"Not configured: {error}")
         return 1
 
-    cfg = client.config
-    print(f"Provider: {cfg.provider}\nModel:    {cfg.model}\nEndpoint: {cfg.base_url}")
-    try:
-        reply = client.complete([{"role": "user", "content": "Reply with the single word: ok"}])
-    except Exception as error:  # noqa: BLE001 - report any failure from any provider plainly
-        print(f"\nThe call failed: {type(error).__name__}: {error}")
-        return 1
+    cfg = next(iter(clients.values())).config
+    print(f"Provider: {cfg.provider}\nEndpoint: {cfg.base_url}\n")
+    for agent, client in clients.items():
+        print(f"  {agent:<11}{client.config.model}")
+    print()
 
-    cost = f", ${reply.cost_usd:.6f}" if reply.cost_usd is not None else ""
-    print(f"Reply:    {reply.text.strip()!r}")
-    print(f"Usage:    {reply.input_tokens} in, {reply.output_tokens} out{cost}")
-    print("\nThe key works.")
+    failed = False
+    for client in {id(c): c for c in clients.values()}.values():
+        model = client.config.model
+        try:
+            reply = client.complete([{"role": "user", "content": "Reply with the single word: ok"}])
+        except Exception as error:  # noqa: BLE001 - report any failure from any provider plainly
+            print(f"{model}: FAILED, {type(error).__name__}: {error}")
+            failed = True
+            continue
+        cost = f", ${reply.cost_usd:.6f}" if reply.cost_usd is not None else ""
+        print(
+            f"{model}: answered {reply.text.strip()!r} ({reply.input_tokens} in, "
+            f"{reply.output_tokens} out{cost})"
+        )
+
+    if failed:
+        print(
+            "\nA model failed. Check its name in settings.yaml "
+            "(for OpenRouter: openrouter.ai/models)."
+        )
+        return 1
+    print("\nThe key works, and every model answers.")
     return 0
 
 

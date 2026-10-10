@@ -16,8 +16,8 @@ folder is the same either way.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,7 +26,13 @@ from pipeline import clean
 from pipeline.agents import analysis, diagnostic, planner
 from pipeline.agents.coder import CoderError
 from pipeline.agents.decisions import DecisionsError
-from pipeline.agents.llm import LLMClient, LLMConfigError, connect
+from pipeline.agents.llm import (
+    LLMClient,
+    LLMConfigError,
+    connect_agents,
+    describe_models,
+    public_info,
+)
 from pipeline.contracts.context_brief import load_context_brief
 from pipeline.ingest import IngestionResult, default_out_dir, ingest, update_index
 from pipeline.ingestion.raw import RawStore
@@ -60,7 +66,10 @@ def run_all(
     client: LLMClient,
     **options: Any,
 ) -> RunSummary:
-    """Every step on one file, into one run folder, then the reports."""
+    """Every step on one file, into one run folder, then the reports.
+
+    `client` runs every agent that `clients` (agent name -> client) does not name.
+    """
     summary = _run_steps(source, brief_path, client, **options)
     try:
         build_reports(summary.run_dir)
@@ -74,9 +83,8 @@ def _run_steps(
     brief_path: str | Path | None,
     client: LLMClient,
     *,
+    clients: Mapping[str, LLMClient] | None = None,
     provider: dict[str, str] | None = None,
-    review_client: LLMClient | None = None,
-    review_provider: dict[str, str] | None = None,
     reviewing: bool = True,
     planning: bool = True,
     budget_usd: float = clean.DEFAULT_BUDGET_USD,
@@ -84,7 +92,10 @@ def _run_steps(
     sheet: str | None = None,
     seed: int = 42,
 ) -> RunSummary:
-    provider = provider or {}
+    def agent(name: str) -> tuple[LLMClient, dict[str, str]]:
+        chosen = (clients or {}).get(name, client)
+        return chosen, public_info(chosen, provider)
+
     brief = load_context_brief(brief_path) if brief_path else None
     with RawStore.open() as store:
         ingestion = ingest(source, brief, store=store, sheet=sheet, seed=seed)
@@ -99,19 +110,21 @@ def _run_steps(
         return summary
 
     try:
-        summary.diagnosis = diagnostic.run_on_folder(run_dir, client, provider)
+        summary.diagnosis = diagnostic.run_on_folder(run_dir, *agent("diagnostic"))
     except diagnostic.DiagnosisError as error:
         summary.stopped_at = "diagnosis"
         summary.reason = f"{error} Every attempt is logged in {diagnostic.DIAGNOSTIC_LOG}."
         return summary
 
     try:
+        coder, coder_provider = agent("coder")
+        reviewer, reviewer_provider = agent("reviewer")
         summary.cleaning = clean.clean_folder(
             run_dir,
-            client,
-            provider,
-            review_client=review_client,
-            review_provider=review_provider,
+            coder,
+            coder_provider,
+            review_client=reviewer,
+            review_provider=reviewer_provider,
             reviewing=reviewing,
             budget_usd=budget_usd,
         )
@@ -128,7 +141,7 @@ def _run_steps(
         return summary
 
     try:
-        summary.planning = planner.run_on_folder(run_dir, client, provider)
+        summary.planning = planner.run_on_folder(run_dir, *agent("planner"))
     except planner.PlannerError as error:
         summary.stopped_at = "planning"
         summary.reason = f"{error} Every attempt is logged in {planner.PLANNER_LOG}."
@@ -139,7 +152,7 @@ def _run_steps(
         return summary
 
     try:
-        summary.analysis = analysis.run_on_folder(run_dir, client, provider)
+        summary.analysis = analysis.run_on_folder(run_dir, *agent("analysis"))
     except analysis.AnalysisError as error:
         summary.stopped_at = "analysis"
         summary.reason = f"{error} Every attempt is logged in {analysis.ANALYSIS_LOG}."
@@ -283,9 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        client = connect()
-        review_model = os.environ.get("LLM_REVIEW_MODEL", "").strip() or None
-        review_client = connect(model=review_model) if review_model else client
+        clients = connect_agents()
     except LLMConfigError as error:
         print(f"Not configured: {error}")
         return 1
@@ -297,15 +308,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     sheet = args.sheet or (load_context_brief(brief).sheet if brief else None)
 
-    print(f"Running {source} with {client.config.model}. This takes a few minutes...")
+    print(f"Running {source}. This takes a few minutes...")
+    print(f"Models: {describe_models(clients)}")
     try:
         summary = run_all(
             source,
             brief,
-            client,
-            provider=client.config.public(),
-            review_client=review_client,
-            review_provider=review_client.config.public(),
+            clients["diagnostic"],
+            clients=clients,
             reviewing=not args.no_review,
             budget_usd=args.budget,
             out=args.out,

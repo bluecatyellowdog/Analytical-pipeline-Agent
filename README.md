@@ -163,14 +163,25 @@ Old run folders, from before this layout, are moved into it the first time a com
 
 ## Settings
 
-In `.env`:
+**Which AI each agent uses** is set in [settings.yaml](settings.yaml): a `default` model, and a line for any agent that should use another one. Out of the box the two agents whose mistakes no check can catch, `analysis` and `diagnostic`, use the strongest model and the rest a cheaper one:
+
+```yaml
+models:
+  default: anthropic/claude-sonnet-5.5
+  analysis: anthropic/claude-opus-5.5
+  diagnostic: anthropic/claude-opus-5.5
+  # reviewer: openai/...   # a different family gives a real second opinion
+```
+
+The agents are `diagnostic`, `coder`, `reviewer`, `planner` and `analysis`. A run prints which model each one uses before it starts, and the audit PDF records it. After a change, `uv run python -m pipeline.agents.llm` checks that every model answers.
+
+**The key** is in `.env`, which git ignores:
 
 | Setting | Use |
 | --- | --- |
 | `LLM_API_KEY` | Required. The provider is recognised from the key. |
-| `LLM_MODEL` | Optional. Defaults exist for OpenRouter and Anthropic keys. |
-| `LLM_REVIEW_MODEL` | Optional. A different, e.g. cheaper, model for the reviewer. |
 | `LLM_BASE_URL` | Optional. Any other OpenAI-compatible endpoint, e.g. a local Ollama server. |
+| `LLM_MODEL` | Optional. Used only when settings.yaml names no model for an agent. Defaults exist for OpenRouter and Anthropic keys. |
 
 Command options:
 
@@ -281,6 +292,7 @@ Rules every tool follows:
 | [pipeline/checks/](pipeline/checks/) | Gates 1 to 4, the reconciliation checks, the schema contract and the number check |
 | [pipeline/tools/](pipeline/tools/) | The reviewer's query tool, the analysis tools (statistics, charts, regressions), and the loader that prepares the clean data for analysis |
 | [briefs/](briefs/) | Your briefs, one per dataset, and the template |
+| [settings.yaml](settings.yaml) | Which AI model each agent uses |
 | [pipeline/run.py](pipeline/run.py) | The one command for the whole workflow |
 | [pipeline/reports/](pipeline/reports/) | `REPORT.pdf` and the detail documents, rebuilt from the run folder (`python -m pipeline.reports runs/<folder>`) |
 | [pipeline/layout.py](pipeline/layout.py) | Where every file of a run folder lives |

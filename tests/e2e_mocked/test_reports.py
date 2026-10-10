@@ -88,7 +88,7 @@ def full_run(workspace):
             *FIXTURE_ANALYSIS_REPLIES,
         ]
     )
-    return run_all("loans.csv", "brief.yaml", llm, review_client=FakeLLM([VERDICT]))
+    return run_all("loans.csv", "brief.yaml", llm, clients={"reviewer": FakeLLM([VERDICT])})
 
 
 def report(run) -> str:

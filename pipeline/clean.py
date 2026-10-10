@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -38,7 +37,7 @@ from pipeline.agents.common import (
 )
 from pipeline.agents.decisions import DECISIONS_FILE, DecisionsError, load_decisions
 from pipeline.agents.diagnostic import DIAGNOSIS_JSON
-from pipeline.agents.llm import LLMClient, LLMConfigError, connect
+from pipeline.agents.llm import LLMClient, LLMConfigError, connect_agents
 from pipeline.agents.reviewer import (
     ReviewerError,
     ReviewInputs,
@@ -924,9 +923,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{run_dir} is not a run folder (no logs/manifest.json).")
         return 1
     try:
-        client = connect()
-        review_model = os.environ.get("LLM_REVIEW_MODEL", "").strip() or None
-        review_client = connect(model=review_model) if review_model else client
+        clients = connect_agents()
+        client, review_client = clients["coder"], clients["reviewer"]
     except LLMConfigError as error:
         print(f"Not configured: {error}")
         return 1

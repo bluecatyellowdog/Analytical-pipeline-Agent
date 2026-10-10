@@ -1,0 +1,22 @@
+# Which AI model each agent uses. Model names are not secret; your API key stays in .env.
+#
+# Write names the way your provider does (for OpenRouter: openrouter.ai/models).
+# After a change, check that every model answers (costs a fraction of a cent):
+#   uv run python -m pipeline.agents.llm
+#
+# An agent without its own line uses `default`.
+
+models:
+  default: anthropic/claude-sonnet-5.5
+
+  # Strongest model where no check can catch a mistake:
+  analysis: anthropic/claude-opus-5.5     # picks the tools, reads the results, writes the findings
+  diagnostic: anthropic/claude-opus-5.5   # spots data problems, settles the judgment calls
+
+  # Checked by code (sandbox, gates), so the default is enough. To change one, remove the #:
+  # coder: anthropic/claude-sonnet-5.5    # writes the cleaning code
+  # planner: anthropic/claude-sonnet-5.5  # turns your goal into questions
+
+  # A different family gives a real second opinion on the coder's work, e.g. an OpenAI or
+  # Google model. Look up the exact name on openrouter.ai/models, then remove the #:
+  # reviewer: openai/...

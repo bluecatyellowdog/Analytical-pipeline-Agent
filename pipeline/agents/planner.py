@@ -41,7 +41,7 @@ from pipeline.agents.common import (
     total_cost,
     write_attempt_log,
 )
-from pipeline.agents.llm import LLMClient, LLMConfigError, Message, connect
+from pipeline.agents.llm import LLMClient, LLMConfigError, Message, connect_agent
 from pipeline.checks.gates import problems_of
 from pipeline.checks.plan_gate import gate_3_plan, leak_suspects
 from pipeline.contracts.audit import GateResult
@@ -359,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        client = connect()
+        client = connect_agent("planner")
     except LLMConfigError as error:
         print(f"Not configured: {error}")
         return 1

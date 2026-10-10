@@ -12,11 +12,18 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from pipeline.agents import analysis, planner
-from pipeline.agents.llm import LLMClient, LLMConfigError, connect
+from pipeline.agents.llm import (
+    LLMClient,
+    LLMConfigError,
+    connect_agents,
+    describe_models,
+    public_info,
+)
 from pipeline.layout import is_run_folder, upgrade_layout
 from pipeline.reports import build_reports
 from pipeline.tools.context import AnalysisInputError
@@ -38,15 +45,28 @@ class AnalyzeSummary:
         return sum(step.cost_usd for step in steps if step is not None)
 
 
-def analyze_folder(run_dir: Path, client: LLMClient, provider: dict[str, str]) -> AnalyzeSummary:
-    """Plan if needed, analyse, and rebuild the reports; a failed step is reported, not raised."""
+def analyze_folder(
+    run_dir: Path,
+    client: LLMClient,
+    provider: dict[str, str],
+    clients: Mapping[str, LLMClient] | None = None,
+) -> AnalyzeSummary:
+    """Plan if needed, analyse, and rebuild the reports; a failed step is reported, not raised.
+
+    `client` runs the planner and the analysis unless `clients` names their own.
+    """
+
+    def agent(name: str) -> tuple[LLMClient, dict[str, str]]:
+        chosen = (clients or {}).get(name, client)
+        return chosen, public_info(chosen, provider)
+
     upgrade_layout(run_dir)
     summary = AnalyzeSummary(run_dir=run_dir)
     report: Path | None = None
     try:
         if planner.plan_in_force(run_dir) is None:
-            summary.planning = planner.run_on_folder(run_dir, client, provider)
-        summary.analysis = analysis.run_on_folder(run_dir, client, provider)
+            summary.planning = planner.run_on_folder(run_dir, *agent("planner"))
+        summary.analysis = analysis.run_on_folder(run_dir, *agent("analysis"))
     except AnalysisInputError as error:
         summary.stopped = str(error)
     except planner.PlannerError as error:
@@ -91,12 +111,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{run_dir} is not a run folder (no logs/manifest.json).")
         return 1
     try:
-        client = connect()
+        clients = connect_agents()
     except LLMConfigError as error:
         print(f"Not configured: {error}")
         return 1
-    print(f"Analysing {run_dir} with {client.config.model}. This takes a minute or two...")
-    summary = analyze_folder(run_dir, client, client.config.public())
+    used = {name: clients[name] for name in ("planner", "analysis")}
+    print(f"Analysing {run_dir} ({describe_models(used)}). This takes a minute or two...")
+    summary = analyze_folder(run_dir, clients["analysis"], {}, clients=clients)
     print()
     print(summarise(summary))
     return 0 if summary.analysis is not None else 1
