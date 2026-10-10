@@ -1,6 +1,7 @@
 # Context brief for the Titanic passenger list (data/raw/Titanic-Dataset.csv).
 # Every checkable statement here is treated as a hypothesis and verified in Stage 1.
 data_file: data/raw/Titanic-Dataset.csv
+title: Who survived the Titanic?
 
 description: >
   One row per passenger on the Titanic's maiden voyage in April 1912, from the

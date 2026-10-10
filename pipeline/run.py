@@ -36,7 +36,7 @@ from pipeline.agents.llm import (
 from pipeline.contracts.context_brief import load_context_brief
 from pipeline.ingest import IngestionResult, default_out_dir, ingest, update_index
 from pipeline.ingestion.raw import RawStore
-from pipeline.layout import REPORT_PDF, run_file
+from pipeline.layout import REPORT_HTML, REPORT_PDF, run_file
 from pipeline.reports import build_reports
 from pipeline.tools.context import AnalysisInputError
 
@@ -171,6 +171,7 @@ def summarise(summary: RunSummary) -> str:
         f"Start here: {report.resolve()}"
         if report.exists()
         else f"The report could not be written: {summary.pdf_error}",
+        f"In a browser: {run_file(folder, REPORT_HTML).resolve()}",
         f"Run folder: {folder.resolve()}",
         "",
         f"1. Ingest    {load.n_loaded:,} rows loaded, {load.n_rejected:,} rejected. "

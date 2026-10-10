@@ -1,6 +1,8 @@
-"""The reports of a run folder: REPORT.pdf with the essentials, and one detail document per section.
+"""The reports of a run folder: the answer in plain words, and the detail documents behind it.
 
-    REPORT.pdf                  start here: the answer, data quality, decisions, a wrap-up
+    REPORT.pdf                  start here: the answer in plain words, in two pages
+    REPORT.html                 the same in a browser, with more to unfold under each part
+    details/0_technical_summary.pdf  the same run with exact figures and the full wrap-up
     details/1_analysis.pdf      every finding with its charts and tool results; the plan
     details/2_data_quality.pdf  the data as received, what was wrong, every change, the checks
     details/3_decisions.pdf     every judgment call: options, decision, why, what it changed
@@ -21,7 +23,9 @@ from pipeline.layout import (
     AUDIT_PDF,
     DATA_QUALITY_PDF,
     DECISIONS_PDF,
+    REPORT_HTML,
     REPORT_PDF,
+    TECHNICAL_PDF,
     ensure_layout,
     is_run_folder,
     run_file,
@@ -34,11 +38,14 @@ from pipeline.reports.details import (
     data_quality_document,
     decisions_document,
 )
-from pipeline.reports.main import main_document, report_title
+from pipeline.reports.html import write_html
+from pipeline.reports.main import plain_document
+from pipeline.reports.summary import build_summary
+from pipeline.reports.technical import technical_document, technical_title
 
 
 def build_reports(run_dir: str | Path) -> Path:
-    """Write REPORT.pdf and the detail documents; return the path of REPORT.pdf."""
+    """Write REPORT.pdf, REPORT.html and the detail documents; return the path of REPORT.pdf."""
     run_dir = Path(run_dir)
     upgrade_layout(run_dir)
     ensure_layout(run_dir)
@@ -57,7 +64,10 @@ def build_reports(run_dir: str | Path) -> Path:
         f"Decisions made for you - {name}",
         decisions_document(run),
     )
-    report = write_pdf(run_file(run_dir, REPORT_PDF), report_title(run), main_document(run))
+    write_pdf(run_file(run_dir, TECHNICAL_PDF), technical_title(run), technical_document(run))
+    summary = build_summary(run)
+    report = write_pdf(run_file(run_dir, REPORT_PDF), summary.title, plain_document(summary))
+    write_html(run_file(run_dir, REPORT_HTML), summary)
     write_pdf(run_file(run_dir, AUDIT_PDF), f"Audit - {name}", audit_document(Run(run_dir)))
     return report
 
@@ -67,7 +77,9 @@ def main(argv: list[str] | None = None) -> int:
     if len(args) != 1 or not is_run_folder(Path(args[0])):
         print("usage: python -m pipeline.reports runs/<run folder>")
         return 1
-    print(f"Wrote {build_reports(args[0]).resolve()}")
+    report = build_reports(args[0])
+    print(f"Wrote {report.resolve()}")
+    print(f"  and {report.with_name(REPORT_HTML).resolve()}")
     return 0
 
 

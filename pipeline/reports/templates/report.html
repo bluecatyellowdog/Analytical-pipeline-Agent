@@ -1,0 +1,151 @@
+<!doctype html>
+{#- REPORT.html: the same content as REPORT.pdf (see pipeline/reports/summary.py), for a browser.
+    Edit freely: the look is yours. `s` is the MainSummary; `img(path)` embeds a chart. -#}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ s.title }}</title>
+<style>
+  :root {
+    --ink: #1f2328; --muted: #59636e; --line: #d1d9e0; --soft: #f6f8fa; --accent: #0969da;
+    --green-bg: #dafbe1; --green: #1a7f37; --yellow-bg: #fff8c5; --yellow: #9a6700;
+    --red-bg: #ffebe9; --red: #cf222e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #fff; color: var(--ink);
+    font: 16px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 4px; }
+  h2 { font-size: 21px; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .sub, .note { color: var(--muted); font-size: 14px; }
+  .question { background: var(--soft); border-radius: 8px; padding: 14px 16px; margin: 20px 0 0; }
+  .answer { font-size: 19px; line-height: 1.5; margin: 0 0 6px; }
+  .finding { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px;
+             padding: 16px 0; border-bottom: 1px solid var(--line); align-items: start; }
+  .finding.no-chart { grid-template-columns: 1fr; }
+  .finding img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+  .number { font-size: 26px; font-weight: 700; color: var(--accent); margin: 0; }
+  .sentence { font-size: 17px; margin: 4px 0 6px; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--accent); font-size: 15px; }
+  details > div { margin-top: 8px; padding: 12px 14px; background: var(--soft); border-radius: 6px; font-size: 15px; }
+  details img { margin-top: 10px; }
+  ul { padding-left: 22px; }
+  li { margin: 4px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  td, th { text-align: left; vertical-align: top; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .pill { display: inline-block; min-width: 72px; text-align: center; font-weight: 700;
+          font-size: 13px; padding: 3px 10px; border-radius: 999px; }
+  .green { background: var(--green-bg); color: var(--green); }
+  .yellow { background: var(--yellow-bg); color: var(--yellow); }
+  .red { background: var(--red-bg); color: var(--red); }
+  a { color: var(--accent); }
+  @media (max-width: 640px) {
+    .finding { grid-template-columns: 1fr; }
+    h1 { font-size: 25px; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>{{ s.title }}</h1>
+<div class="sub">{{ s.file_name }} · {{ "{:,}".format(s.rows) }} rows</div>
+
+{% if s.question %}
+<div class="question"><strong>Your question</strong><br>{{ s.question }}</div>
+{% endif %}
+
+<h2>The answer</h2>
+{% if s.stopped %}<p class="answer">{{ s.stopped }}</p>{% endif %}
+{% if s.answer %}
+<p class="answer">{{ s.answer }}</p>
+<div class="note">Written by the AI from the analysis; every number was checked against it.</div>
+{% endif %}
+
+<h2>What we found</h2>
+{% for f in s.findings %}
+<div class="finding{% if not f.charts %} no-chart{% endif %}">
+  {% if f.charts %}<img src="{{ img(f.charts[0]) }}" alt="Chart for {{ f.id }}">{% endif %}
+  <div>
+    {% if f.number %}<p class="number">{{ f.number }}</p>{% endif %}
+    <p class="sentence">{{ f.sentence }}</p>
+    <div class="note">{{ f.evidence }}</div>
+    <details>
+      <summary>Show more</summary>
+      <div>
+        <p>{{ f.detail }}</p>
+        {% if f.caveats %}<p><strong>Be careful:</strong></p>
+        <ul>{% for c in f.caveats %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
+        {% for chart in f.charts[1:] %}<img src="{{ img(chart) }}" alt="Another chart for {{ f.id }}">{% endfor %}
+        <p class="note">All the numbers behind it: {{ f.id }} in
+          <a href="details/1_analysis.pdf">details/1_analysis.pdf</a></p>
+      </div>
+    </details>
+  </div>
+</div>
+{% else %}
+<p>Nothing yet: the analysis did not run.</p>
+{% endfor %}
+{% if s.findings_not_shown %}
+<p class="note">{{ s.findings_not_shown }} more finding(s) in <a href="details/1_analysis.pdf">details/1_analysis.pdf</a>.</p>
+{% endif %}
+
+{% if s.actions %}
+<h2>What you could do</h2>
+<ul>{% for a in s.actions %}<li>{{ a }}</li>{% endfor %}</ul>
+<div class="note">Suggested by the AI from the findings.</div>
+{% endif %}
+
+<h2>How much can you trust this?</h2>
+<table>
+{% for light in s.lights %}
+  <tr>
+    <td style="width: 90px"><span class="pill {{ light.colour }}">{{ light.word }}</span></td>
+    <td style="width: 100px"><strong>{{ light.topic }}</strong></td>
+    <td>{{ light.text }} <a href="{{ light.where }}">More</a></td>
+  </tr>
+{% endfor %}
+</table>
+{% if s.decisions %}
+<details>
+  <summary>Show the decisions made for you</summary>
+  <div>
+    <table>
+      <tr><th></th><th>Question</th><th>Decided</th><th>By</th><th>How sure</th></tr>
+      {% for d in s.decisions %}
+      <tr><td>{{ d.id }}</td><td>{{ d.question }}</td><td>{{ d.decided }}</td><td>{{ d.by }}</td><td>{{ d.sure }}</td></tr>
+      {% endfor %}
+    </table>
+    <p class="note">To change one, edit edit/decisions.yaml and run again.</p>
+  </div>
+</details>
+{% endif %}
+
+{% if s.cautions %}
+<h2>Keep in mind</h2>
+<ul>{% for c in s.cautions %}<li>{{ c }}</li>{% endfor %}</ul>
+{% if s.all_points | length > s.cautions | length %}
+<details>
+  <summary>Show all {{ s.all_points | length }} points</summary>
+  <div><ul>{% for c in s.all_points %}<li>{{ c }}</li>{% endfor %}</ul></div>
+</details>
+{% endif %}
+{% endif %}
+
+<h2>Want more?</h2>
+<table>
+{% for path, what in s.documents %}
+  <tr><td style="width: 40%"><a href="{{ path }}">{{ path }}</a></td><td>{{ what }}</td></tr>
+{% endfor %}
+</table>
+<p class="note">To change a cleaning decision, edit edit/decisions.yaml; to change the questions,
+  edit edit/analysis_plan.yaml. Then run again.</p>
+
+</main>
+</body>
+</html>

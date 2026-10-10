@@ -76,6 +76,10 @@ class ContextBrief(Strict):
         "data/raw/loans.csv. With it, `pipeline.run <brief>` needs nothing else.",
     )
     sheet: str | None = Field(default=None, description="The Excel sheet, for an Excel file.")
+    title: str | None = Field(
+        default=None,
+        description="The report's title, e.g. 'What drives customer churn?'. Default: the file.",
+    )
     description: str = Field(description="What the rows are and where they come from.")
     goal: str = Field(description="The question or decision the analysis should serve.")
     target: str | None = Field(default=None, description="Target column, if known.")

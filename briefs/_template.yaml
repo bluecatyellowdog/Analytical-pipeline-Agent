@@ -19,6 +19,9 @@ description: >
 
 # --- Optional extras: remove the # in front of a line to use it ----------------------
 
+# The report's title (default: from the file name).
+# title: What drives customer churn?
+
 # The column that is the answer to your question (a yes/no or a number).
 # target: my_outcome_column
 

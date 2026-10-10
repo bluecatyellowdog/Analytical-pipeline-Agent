@@ -262,6 +262,8 @@ class TestCli:
         written = {p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()}
         assert written == {
             "REPORT.pdf",
+            "REPORT.html",
+            "details/0_technical_summary.pdf",
             "details/1_analysis.pdf",
             "details/2_data_quality.pdf",
             "details/2_data_columns.xlsx",

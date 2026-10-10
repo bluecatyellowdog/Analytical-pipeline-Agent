@@ -1,10 +1,11 @@
-"""The reports of a run: REPORT.pdf with the essentials, detail documents behind it, a tidy folder.
+"""The reports of a run: REPORT.pdf and REPORT.html in plain words, detail documents behind them.
 
 Built from the run folder after a mocked run. What is pinned down: the folder
-layout (REPORT.pdf on top, then details/, edit/, data/, logs/), each section of
-REPORT.pdf including the self-critical wrap-up, each detail document, that no
-personal value and no rejected line's raw text reaches a PDF, and that a folder
-from before the layout is moved into it.
+layout (the two reports on top, then details/, edit/, data/, logs/), the fixed
+sections of the plain report in both formats, the technical summary with its
+self-critical wrap-up, each detail document, that no personal value and no
+rejected line's raw text reaches a report, and that a folder from before the
+layout is moved into it.
 """
 
 from __future__ import annotations
@@ -22,7 +23,9 @@ from pipeline.layout import (
     AUDIT_PDF,
     DATA_QUALITY_PDF,
     DECISIONS_PDF,
+    REPORT_HTML,
     REPORT_PDF,
+    TECHNICAL_PDF,
     run_file,
     upgrade_layout,
 )
@@ -95,14 +98,23 @@ def report(run) -> str:
     return pdf_text(run_file(run.run_dir, REPORT_PDF))
 
 
+def technical(run) -> str:
+    return pdf_text(run_file(run.run_dir, TECHNICAL_PDF))
+
+
+def html(run) -> str:
+    return run_file(run.run_dir, REPORT_HTML).read_text(encoding="utf-8")
+
+
 class TestTheFolder:
     def test_the_top_holds_the_report_and_four_folders(self, full_run) -> None:
         top = sorted(p.name for p in full_run.run_dir.iterdir())
-        assert top == [REPORT_PDF, "data", "details", "edit", "logs"]
+        assert top == [REPORT_HTML, REPORT_PDF, "data", "details", "edit", "logs"]
 
     def test_each_file_is_where_a_person_looks_for_it(self, full_run) -> None:
         folder = full_run.run_dir
         for path in (
+            "details/0_technical_summary.pdf",
             "details/1_analysis.pdf",
             "details/2_data_quality.pdf",
             "details/2_data_columns.xlsx",
@@ -123,13 +135,70 @@ class TestTheFolder:
         assert "edit" in text and "decisions.yaml" in text
 
 
-class TestTheReport:
-    def test_it_is_short_and_has_every_section(self, full_run) -> None:
-        path = run_file(full_run.run_dir, REPORT_PDF)
-        assert len(PdfReader(path).pages) <= 4
+class TestThePlainReport:
+    """REPORT.pdf and REPORT.html: the same fixed sections, in plain words."""
+
+    SECTIONS = (
+        "Your question",
+        "The answer",
+        "What we found",
+        "What you could do",
+        "How much can you trust this?",
+        "Keep in mind",
+        "Want more?",
+    )
+
+    def test_the_pdf_has_the_fixed_sections_in_two_pages(self, full_run) -> None:
+        assert len(PdfReader(run_file(full_run.run_dir, REPORT_PDF)).pages) <= 2
         text = report(full_run)
+        positions = [text.find(section) for section in self.SECTIONS]
+        assert -1 not in positions, dict(zip(self.SECTIONS, positions, strict=True))
+        assert positions == sorted(positions)
+
+    def test_the_html_has_the_same_sections(self, full_run) -> None:
+        page = html(full_run)
+        for section in self.SECTIONS:
+            assert section in page, section
+
+    def test_both_say_the_same_answer_findings_and_actions(self, full_run) -> None:
+        for text in (report(full_run), html(full_run)):
+            assert "What the data says: loans" in text
+            assert "Understand loan size." in text
+            assert "The loans vary widely in size, and some ages are missing." in text
+            assert "Loan amounts vary widely." in text
+            assert "Some ages are missing." in text
+            assert "Collect more loans before reading much into the amounts." in text
+
+    def test_the_trust_lights_come_from_the_logs(self, full_run) -> None:
+        text = report(full_run)
+        assert "Checks" in text and "warning" in text  # Gate 2 flagged in this run
+        assert "J1" in text and "not decided" in text
+
+    def test_the_html_unfolds_more_under_each_finding(self, full_run) -> None:
+        page = html(full_run)
+        assert page.count("<details") >= 2
+        assert "The summary shows a wide range of amounts." in page  # F1's technical detail
+
+    def test_both_point_to_the_deeper_documents(self, full_run) -> None:
+        for text in (report(full_run), html(full_run)):
+            for name in (TECHNICAL_PDF, ANALYSIS_PDF, DATA_QUALITY_PDF, DECISIONS_PDF):
+                assert f"details/{name}" in text, name
+
+    def test_a_brief_title_is_used(self, workspace) -> None:
+        brief = workspace / "brief.yaml"
+        brief.write_text("title: What sets loan size?\n" + BRIEF, encoding="utf-8")
+        summary = run_all("broken.csv", "brief.yaml", FakeLLM([]))
+        assert "What sets loan size?" in report(summary)
+        assert "What sets loan size?" in html(summary)
+
+
+class TestTheTechnicalSummary:
+    def test_it_is_short_and_has_every_section(self, full_run) -> None:
+        path = run_file(full_run.run_dir, TECHNICAL_PDF)
+        assert len(PdfReader(path).pages) <= 4
+        text = technical(full_run)
         for expected in (
-            "loans: what the data says",
+            "Technical summary - loans",
             "In brief",
             "Your question: Understand loan size.",
             "1 What we found",
@@ -142,25 +211,27 @@ class TestTheReport:
 
     def test_the_answer_and_the_status_come_first(self, full_run) -> None:
         first_page = re.sub(
-            r"\s+", " ", PdfReader(run_file(full_run.run_dir, REPORT_PDF)).pages[0].extract_text()
+            r"\s+",
+            " ",
+            PdfReader(run_file(full_run.run_dir, TECHNICAL_PDF)).pages[0].extract_text(),
         )
         assert "Loan amounts vary widely." in first_page
         assert "Status: Gate 2 raised a warning" in first_page
 
     def test_data_quality_and_decisions_in_short(self, full_run) -> None:
-        text = report(full_run)
+        text = technical(full_run)
         assert "12 in the file, 12 read" in text
         assert "Does 999 mean unknown?" in text and "nobody" in text
 
     def test_the_wrap_up_is_self_critical_and_says_what_to_do(self, full_run) -> None:
-        text = report(full_run)
+        text = technical(full_run)
         assert "J1 is undecided" in text and "Decide J1 in edit/decisions.yaml" in text
         assert "The reviewer asked (beloeb): Does 999 mean unknown in every year?" in text
         assert "one unusual amount can move every summary" in text
         assert "Collect more loans" in text
 
     def test_it_links_to_every_detail_document(self, full_run) -> None:
-        text = report(full_run)
+        text = technical(full_run)
         for name in (ANALYSIS_PDF, DATA_QUALITY_PDF, DECISIONS_PDF, AUDIT_PDF):
             assert f"details/{name}" in text, name
 
@@ -210,9 +281,9 @@ class TestTheDetails:
         text = self.read(full_run, AUDIT_PDF)
         assert "Models" in text and "logs" in text and "manifest.json" in text
 
-    def test_no_personal_value_reaches_any_pdf(self, full_run) -> None:
-        for path in full_run.run_dir.rglob("*.pdf"):
-            text = pdf_text(path)
+    def test_no_personal_value_reaches_any_report(self, full_run) -> None:
+        for path in [*full_run.run_dir.rglob("*.pdf"), run_file(full_run.run_dir, REPORT_HTML)]:
+            text = pdf_text(path) if path.suffix == ".pdf" else path.read_text(encoding="utf-8")
             assert "@example.dk" not in text, path.name
             assert "00417" not in text, path.name
 
@@ -220,8 +291,10 @@ class TestTheDetails:
 class TestOtherRuns:
     def test_a_blocked_file_still_gets_a_report_without_the_raw_lines(self, workspace) -> None:
         summary = run_all("broken.csv", "brief.yaml", FakeLLM([]))
-        text = report(summary)
+        text = technical(summary)
         assert "Gate 1 blocked" in text and "The loading step stopped" in text
+        plain = report(summary)
+        assert "could not be read faithfully" in plain and "Stopped" in plain
         quality = pdf_text(run_file(summary.run_dir, DATA_QUALITY_PDF))
         assert "4 fields, expected 3" in quality
         assert "2,Beta,200,EXTRA" not in quality

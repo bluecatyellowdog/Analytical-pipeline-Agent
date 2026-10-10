@@ -24,7 +24,7 @@ from pipeline.agents.llm import (
     describe_models,
     public_info,
 )
-from pipeline.layout import is_run_folder, upgrade_layout
+from pipeline.layout import REPORT_HTML, is_run_folder, upgrade_layout
 from pipeline.reports import build_reports
 from pipeline.tools.context import AnalysisInputError
 
@@ -94,6 +94,7 @@ def summarise(summary: AnalyzeSummary) -> str:
     lines.append("")
     if summary.report is not None:
         lines.append(f"Start here: {summary.report.resolve()}")
+        lines.append(f"In a browser: {summary.report.with_name(REPORT_HTML).resolve()}")
     else:
         lines.append(f"The report could not be written: {summary.pdf_error}")
     return "\n".join(lines)

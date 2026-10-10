@@ -1,7 +1,8 @@
 """Where everything in a run folder lives, in one place so every step agrees.
 
     runs/<name>/
-    ├── REPORT.pdf    start here: the essentials in a few pages
+    ├── REPORT.pdf    start here: the answer in plain words, in two pages
+    ├── REPORT.html   the same in a browser, with more to unfold under each part
     ├── details/      one document per section, the Excel column overview, the charts
     ├── edit/         the two files you change to change the result
     ├── data/         the clean data, and the rows that were dropped or could not be read
@@ -22,10 +23,12 @@ import sys
 from pathlib import Path
 
 REPORT_PDF = "REPORT.pdf"
+REPORT_HTML = "REPORT.html"
 DETAILS, EDIT, DATA, LOGS = "details", "edit", "data", "logs"
 CHARTS = f"{DETAILS}/charts"
 MANIFEST = "manifest.json"
 
+TECHNICAL_PDF = "0_technical_summary.pdf"
 ANALYSIS_PDF = "1_analysis.pdf"
 DATA_QUALITY_PDF = "2_data_quality.pdf"
 DATA_COLUMNS_XLSX = "2_data_columns.xlsx"
@@ -34,6 +37,8 @@ AUDIT_PDF = "4_audit.pdf"
 
 PLACES: dict[str, str] = {
     REPORT_PDF: "",
+    REPORT_HTML: "",
+    TECHNICAL_PDF: DETAILS,
     ANALYSIS_PDF: DETAILS,
     DATA_QUALITY_PDF: DETAILS,
     DATA_COLUMNS_XLSX: DETAILS,

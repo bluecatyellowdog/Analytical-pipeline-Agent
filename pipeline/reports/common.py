@@ -322,15 +322,25 @@ STATUS_WORDS = {
 CHART_WIDTH = 150 * mm
 
 
-def chart(run: Run, artifact: dict[str, Any], width: float = CHART_WIDTH) -> Image | None:
+def chart_path(run: Run, artifact: dict[str, Any]) -> Path | None:
+    """Where an artifact's chart is, if it has one."""
     chart_file = artifact.get("spec", {}).get("chart_file")
     if not chart_file:
         return None
     path = run.dir / chart_file
     if not path.exists():  # a run from before the current layout kept its charts elsewhere
         path = run.dir / CHARTS / Path(chart_file).name
-    if not path.exists():
+    return path if path.exists() else None
+
+
+def chart(run: Run, artifact: dict[str, Any], width: float = CHART_WIDTH) -> Image | None:
+    path = chart_path(run, artifact)
+    if path is None:
         return None
+    return chart_image(path, width)
+
+
+def chart_image(path: Path, width: float = CHART_WIDTH) -> Image:
     pixels_wide, pixels_high = ImageReader(str(path)).getSize()
     return Image(str(path), width=width, height=width * pixels_high / pixels_wide)
 

@@ -2,6 +2,7 @@
 # Run it with:  uv run python -m pipeline.run briefs/telco.yaml
 
 data_file: data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv
+title: What drives customer churn?
 
 description: >
   One row per customer of a telecom company (IBM sample data). Each row shows the

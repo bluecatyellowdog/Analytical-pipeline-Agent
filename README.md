@@ -21,7 +21,7 @@ More detail: [specification](docs/project_spec.pdf) · [working rules](CLAUDE.md
 | 5. Clean | AI: coder and reviewer | The coder writes a cleaning plan, which runs step by step from the original data. **Gate 2** checks the result. The reviewer checks that it makes sense and can send fixes back, at most twice. | `pipeline.clean` |
 | 6. Plan the analysis | AI: planner | Writes 3–5 questions that serve your goal, each answered with the [analysis tools](#analysis-tools), and marks what this data cannot answer, with the reason. **Gate 3** checks the plan. It is approved automatically; to change it, edit `edit/analysis_plan.yaml`. | `pipeline.agents.planner` |
 | 7. Analyse | AI: analysis agent | Runs the plan with the tools in up to three rounds, following up on whatever looks interesting, then writes up what it found: an answer per question and findings that cite the tool results behind them. **Gate 4** checks that every number in the write-up is one a tool reported. | `pipeline.analyze` |
-| 8. Read the report | You | `REPORT.pdf`: the answer, how good the data is, the decisions made for you, and a self-critical wrap-up, in three or four pages. Each section links to a detail document. To change a cleaning decision, edit `edit/decisions.yaml` and run step 5 again; to change the analysis, edit `edit/analysis_plan.yaml` and run step 7 again. | – |
+| 8. Read the report | You | `REPORT.pdf` or `REPORT.html`: the answer in plain words, in two pages, with links to the detail documents. To change a cleaning decision, edit `edit/decisions.yaml` and run step 5 again; to change the analysis, edit `edit/analysis_plan.yaml` and run step 7 again. | – |
 
 Steps 2, 3 and 5–7 run in one go with `pipeline.run`; the separate commands do the same work one step at a time.
 
@@ -66,7 +66,7 @@ uv run pytest
 uv run python -m pipeline.run briefs/telco.yaml
 ```
 
-It ingests, diagnoses and cleans the file, then plans and runs the analysis, and prints a short summary and where `REPORT.pdf` is. `runs/index.md` lists every run. To run again after changing the brief, run the same command.
+It ingests, diagnoses and cleans the file, then plans and runs the analysis, and prints a short summary and where `REPORT.pdf` and `REPORT.html` are. `runs/index.md` lists every run. To run again after changing the brief, run the same command.
 
 You can also give the data file and the brief separately, e.g. the small Danish loan file from the test set:
 
@@ -116,7 +116,8 @@ A judgment call is a cleaning question the data cannot answer by itself, where t
 
 Every decision appears in three places:
 - **`edit/decisions.yaml`**, the file you edit.
-- **`REPORT.pdf`, section 3**: a short table, least certain first.
+- **`REPORT.pdf`**: a traffic light for the decisions; `REPORT.html` unfolds the table.
+- **`details/0_technical_summary.pdf`, section 3**: a short table, least certain first.
 - **`details/3_decisions.pdf`**: each decision with its options, reasons, alternatives and what it changed in the data (measured).
 
 **To change a decision,** edit its `decision:` line in `edit/decisions.yaml`. You can write another option, your own words, or `undecided` to leave that data untouched. Then run `pipeline.clean` and `pipeline.analyze` again. The original data is never modified, so every decision can be undone.
@@ -125,25 +126,31 @@ Every decision appears in three places:
 
 ```
 runs/<file>_<date-time>/
-├── REPORT.pdf     ← start here
-├── details/       one document per section of the report
+├── REPORT.pdf     ← start here: the answer in plain words
+├── REPORT.html    the same in a browser, with more to unfold
+├── details/       the technical summary and one document per section
 ├── edit/          the two files you change to change the result
 ├── data/          the clean data and the rows that were left out
 └── logs/          the machine-readable audit trail
 ```
 
-**`REPORT.pdf`** is three or four pages:
-- **In brief:** your question, the answer in a few lines, and the status of every check.
-- **1. What we found:** each question's answer and findings, with a key chart.
-- **2. How good the data is:** rows, problems fixed, what is still missing, and what that means for the findings.
-- **3. Decisions made for you:** every judgment call, who decided it and how sure they were.
-- **4. Wrap-up:** what might be wrong and what we recommend. This comes from the checks, the decisions and the review, plus the analysis's own doubts (marked AI).
+**`REPORT.pdf`** is written for a reader who is not technical. It is at most two pages, always in the same order:
+- **Your question**, from the brief.
+- **The answer** in a sentence or two.
+- **What we found:** at most four findings, the strongest first, each with its chart.
+- **What you could do:** at most three suggestions.
+- **How much can you trust this?** Green, yellow or red for the data, the checks and the decisions. Plain code sets the colours from the logs, by fixed rules.
+- **Keep in mind:** the three most important doubts.
+- **Want more?** The detail documents and what each holds.
 
-Each section ends with a link to its detail document.
+**`REPORT.html`** shows the same content in a browser. Under each finding, a "Show more" unfolds its detail, caveats and other charts, and the trust section unfolds the decisions. The charts are built in, so the file can be sent on its own. Its look is set by [pipeline/reports/templates/report.html](pipeline/reports/templates/report.html), which you can edit.
+
+Both are drawn from one summary (`pipeline/reports/summary.py`), so they never disagree. Text the AI wrote is marked, and every number in it was checked by Gate 4. Set `title:` in the brief to give the report a title.
 
 | Folder | File | What it is |
 | --- | --- | --- |
-| `details/` | `1_analysis.pdf` | Every finding with all its charts and tool results, and the plan behind the analysis |
+| `details/` | `0_technical_summary.pdf` | The whole run for a technical reader: exact answers and effect sizes, data quality, decisions, and every point of the self-critical wrap-up |
+| | `1_analysis.pdf` | Every finding with all its charts and tool results, and the plan behind the analysis |
 | | `2_data_quality.pdf` | The data as received, what was wrong, every change (with any code the AI wrote), the checks, the review |
 | | `2_data_columns.xlsx` | The data as received, column by column, in Excel |
 | | `3_decisions.pdf` | Every decision with its options, reasons, alternatives and measured effect |
@@ -294,7 +301,7 @@ Rules every tool follows:
 | [briefs/](briefs/) | Your briefs, one per dataset, and the template |
 | [settings.yaml](settings.yaml) | Which AI model each agent uses |
 | [pipeline/run.py](pipeline/run.py) | The one command for the whole workflow |
-| [pipeline/reports/](pipeline/reports/) | `REPORT.pdf` and the detail documents, rebuilt from the run folder (`python -m pipeline.reports runs/<folder>`) |
+| [pipeline/reports/](pipeline/reports/) | `REPORT.pdf`, `REPORT.html` and the detail documents, rebuilt from the run folder (`python -m pipeline.reports runs/<folder>`) |
 | [pipeline/layout.py](pipeline/layout.py) | Where every file of a run folder lives |
 | [pipeline/ingest.py](pipeline/ingest.py), [pipeline/clean.py](pipeline/clean.py), [pipeline/analyze.py](pipeline/analyze.py) | The commands for steps 2, 5 and 6–7 |
 | [benchmark/](benchmark/) | The benchmark: synthetic clean data, the breakers, scenarios, the scorer and the runner |
