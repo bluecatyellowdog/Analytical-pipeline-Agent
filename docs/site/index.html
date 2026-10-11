@@ -138,6 +138,15 @@
   .stats span { font-size: 14px; color: #d4dcea; }
   .ok { color: var(--green); font-weight: 700; }
   .placeholder { border: 2px dashed var(--grey-line); border-radius: 12px; padding: 22px; color: var(--muted); background: #fafbfc; }
+  .author { display: flex; gap: 16px; align-items: center; margin-top: 28px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); scroll-margin-top: 60px; }
+  .avatar { flex: none; width: 72px; height: 72px; border-radius: 50%; background: var(--grey-bg); border: 2px dashed var(--grey-line); display: grid; place-items: center; font-size: 12px; color: var(--muted); }
+  .author img { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; }
+  .author p { margin: 0 0 4px; } .who { font-size: 17px; color: var(--navy); } .bio { font-size: 15px; } .links { font-size: 14px; }
+  .skills { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 18px 0 0; }
+  .skills li { font-size: 13px; font-weight: 600; color: var(--navy); background: var(--blue-bg); border-radius: 999px; padding: 4px 11px; }
+  .divider { display: flex; align-items: center; gap: 12px; margin: 64px 0 -24px; color: var(--muted); font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 2px; background: var(--line); }
+  .eyebrow { margin-top: 30px; }
   footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 22px; }
 
   @media (max-width: 860px) {
@@ -150,16 +159,26 @@
     .flow .to { display: none; }
     .node:not(:last-child)::after { content: "↓"; grid-column: 1; text-align: center; color: #9aa4b2; line-height: 1; padding: 4px 0; }
   }
-  @media (max-width: 520px) { .grid4, .stats { grid-template-columns: 1fr; } .stats div { border-right: none; border-bottom: 1px solid rgba(255,255,255,.18); } .node { grid-template-columns: 120px 1fr; } }
+  @media (max-width: 520px) { .author { flex-direction: column; align-items: flex-start; } .grid4, .stats { grid-template-columns: 1fr; } .stats div { border-right: none; border-bottom: 1px solid rgba(255,255,255,.18); } .node { grid-template-columns: 120px 1fr; } }
 </style>
 </head>
 <body>
 <div class="topbar"></div>
 <nav class="toc" aria-label="Sections"><div>
-  <a href="#how">How it works</a><a href="#trust">Why trust it</a><a href="#get">What you get</a>
-  <a href="#architecture">Architecture</a><a href="#monitoring">Monitoring</a><a href="#results">Results</a><a href="#about">About</a>
+  <a href="#about">About me</a><a href="#how">How it works</a><a href="#results">Results</a><a href="#trust">Why trust it</a>
+  <a href="#get">What you get</a><a href="#architecture">Architecture</a><a href="#monitoring">Monitoring</a>
 </div></nav>
 <main>
+
+<section id="about" class="author" aria-label="About me">
+  <!-- ABOUT ME: replace the bracketed placeholders with your own details. For a photo, put e.g. photo.jpg next to this file and replace the circle with <img src="photo.jpg" alt="Your name"> -->
+  <div class="avatar" aria-hidden="true">[Photo]</div>
+  <div>
+    <p class="who"><b>[Your name]</b> · [Your role, e.g. Data scientist / AI engineer]</p>
+    <p class="bio">[One or two lines: who you are and what you are looking for.] I built this project to make AI on data something you can check, not just trust.</p>
+    <p class="links"><a href="#">[CV]</a> · <a href="#">[LinkedIn]</a> · <a href="https://github.com/bluecatyellowdog">GitHub</a> · <a href="#">[E-mail]</a></p>
+  </div>
+</section>
 
 <header>
   <p class="eyebrow">Project overview</p>
@@ -171,7 +190,17 @@
     <a class="btn ghost" href="https://github.com/bluecatyellowdog/Analytical-pipeline-Agent">Code on GitHub</a>
     <a class="btn ghost" href="downloads/technical_architecture.pdf">Technical architecture (PDF)</a>
   </div>
+  <ul class="skills" aria-label="Skills shown in this project">
+    <li>Python</li><li>LLM agents</li><li>AI guardrails</li><li>Data cleaning &amp; quality</li><li>Statistics</li><li>Observability (Langfuse)</li><li>Testing (700+ tests)</li><li>DuckDB</li>
+  </ul>
 </header>
+
+
+
+
+
+
+
 
 <section id="how">
   <div class="h2"><span class="num">01</span><h2>How it works: three steps</h2><span class="rule"></span></div>
@@ -200,8 +229,32 @@
   <p class="loop">↻ Disagree with a decision? Write your choice into the brief and run again. Your expertise corrects the machine.</p>
 </section>
 
+<section id="results">
+  <div class="h2"><span class="num">02</span><h2>First results</h2><span class="rule"></span></div>
+  <div class="stats">
+    <div><b>3 datasets</b><span>Telco churn, Titanic and mobile money fraud: results in line with human analysts</span></div>
+    <div><b>3 of 3</b><span>runs passed all four checkpoints (one with a flag shown for review)</span></div>
+    <div><b>$0.84–1.27</b><span>AI cost per analysis</span></div>
+    <div><b>3–5 min</b><span>of AI time per run</span></div>
+  </div>
+  <p class="small" style="margin-top:10px">Early, informal validation on well-known public datasets; a systematic test against known answers is the next step.</p>
+  <table style="margin-top:14px">
+    <tr><th>Dataset</th><th>Finding</th><th>Pipeline</th><th>Common in public analyses</th></tr>
+    <tr><td>Telco churn<br><span class="small">7,043 customers</span></td><td>Contract type matters most</td><td>Churn 42.7% / 11.3% / 2.8% (month-to-month / 1 year / 2 years)</td><td class="ok">✓ about 43% / 11% / 3%</td></tr>
+    <tr><td></td><td>Fiber optic vs DSL</td><td>41.9% vs 19.0%</td><td class="ok">✓ about 42% vs 19%</td></tr>
+    <tr><td>Titanic<br><span class="small">891 passengers</span></td><td>Sex matters most</td><td>Women 74.2% survived, men 18.9%</td><td class="ok">✓ about 74% vs 19%</td></tr>
+    <tr><td></td><td>Class</td><td>63.0% / 47.3% / 24.2%</td><td class="ok">✓ about 63% / 47% / 24%</td></tr>
+    <tr><td>Mobile money fraud<br><span class="small">PaySim, 200,000-row random sample</span></td><td>Where fraud happens</td><td>Only in transfers (0.7%) and cash-outs (0.2%)</td><td class="ok">✓ only these two types</td></tr>
+    <tr><td></td><td>Fraud amounts</td><td>Much larger (median 401,192 vs 73,996); capped at exactly 10,000,000</td><td class="ok">✓ the simulator's cap</td></tr>
+  </table>
+  <div class="grid2" style="margin-top:18px">
+    <div class="card"><h3>The context steers the method</h3><p>The fraud dataset's notes say the balances of fraudulent transactions were annulled. With no explicit exclusion in the brief, the pipeline read this from the dataset's description and excluded the four balance columns, which would otherwise have given the answer away. It also set aside the existing fraud flag, which fires on only 1 in 200,000 rows.</p></div>
+    <div class="card"><h3>Known limits</h3><p>Associations, not causes. Validated so far on three well-known datasets the AI may have seen before. It analyses the columns it is given and does not create new ones (such as hour of day). A working prototype: local, single user, files only.</p></div>
+  </div>
+</section>
+
 <section id="trust">
-  <div class="h2"><span class="num">02</span><h2>Why the result can be trusted</h2><span class="rule"></span></div>
+  <div class="h2"><span class="num">03</span><h2>Why the result can be trusted</h2><span class="rule"></span></div>
   <div class="grid4">
     <div class="card top"><div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="#16294d" stroke-width="2"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h2M12 11h2M8 15h2M12 15h2M16 11v4"/></svg><b>Code calculates every number</b></div>
       <p>The AI decides what to look at; tested code produces every figure. The AI never calculates a number: every figure it writes is traced to a tool result.</p></div>
@@ -215,7 +268,7 @@
 </section>
 
 <section id="get">
-  <div class="h2"><span class="num">03</span><h2>What you get: one answer, with more depth on demand</h2><span class="rule"></span></div>
+  <div class="h2"><span class="num">04</span><h2>What you get: one answer, with more depth on demand</h2><span class="rule"></span></div>
   <div class="grid3">
     <div class="layer"><div class="tag">Layer 1 · The report</div><h3>The answer in plain words</h3>
       <p>Up to four findings with charts, suggested actions, and a green / yellow / red rating of how far to trust it.</p>
@@ -229,8 +282,10 @@
   </div>
 </section>
 
+<div class="divider"><span>For technical readers</span></div>
+
 <section id="architecture">
-  <div class="h2"><span class="num">04</span><h2>Architecture</h2><span class="rule"></span></div>
+  <div class="h2"><span class="num">05</span><h2>Architecture</h2><span class="rule"></span></div>
   <p class="lead" style="font-weight:600;color:var(--navy)">Like a well-run analysis team: AI specialists make the judgment calls, code does the arithmetic, and checkpoints sign off each stage.</p>
   <div class="grid3 roles">
     <div class="card ai"><b>5 AI specialists · decide</b><p>Each has one job: find problems, fix them, review the fix, plan the analysis, interpret the results.</p></div>
@@ -299,7 +354,7 @@
 </section>
 
 <section id="monitoring">
-  <div class="h2"><span class="num">05</span><h2>Monitoring every AI call</h2><span class="rule"></span></div>
+  <div class="h2"><span class="num">06</span><h2>Monitoring every AI call</h2><span class="rule"></span></div>
   <p>Each run folder is the audit trail of one analysis. On top of that, every AI call can be traced in <b>Langfuse</b>: which specialist made it, with which model, what it was sent and answered, the tokens, the cost and the time. That shows where money and time go, and what changed after a model or prompt was swapped. Tracing is optional and can never stop a run.</p>
   <div class="grid2">
     <figure class="chart" style="margin:0">
@@ -331,40 +386,6 @@
       </ul>
       <p class="small" style="margin-top:12px">Only what the AI is sent is traced: column names, summaries and the brief, never the rows.</p>
     </div>
-  </div>
-</section>
-
-<section id="results">
-  <div class="h2"><span class="num">06</span><h2>First results</h2><span class="rule"></span></div>
-  <div class="stats">
-    <div><b>3 datasets</b><span>Telco churn, Titanic and mobile money fraud: results in line with human analysts</span></div>
-    <div><b>3 of 3</b><span>runs passed all four checkpoints (one with a flag shown for review)</span></div>
-    <div><b>$0.84–1.27</b><span>AI cost per analysis</span></div>
-    <div><b>3–5 min</b><span>of AI time per run</span></div>
-  </div>
-  <p class="small" style="margin-top:10px">Early, informal validation on well-known public datasets; a systematic test against known answers is the next step.</p>
-  <table style="margin-top:14px">
-    <tr><th>Dataset</th><th>Finding</th><th>Pipeline</th><th>Common in public analyses</th></tr>
-    <tr><td>Telco churn<br><span class="small">7,043 customers</span></td><td>Contract type matters most</td><td>Churn 42.7% / 11.3% / 2.8% (month-to-month / 1 year / 2 years)</td><td class="ok">✓ about 43% / 11% / 3%</td></tr>
-    <tr><td></td><td>Fiber optic vs DSL</td><td>41.9% vs 19.0%</td><td class="ok">✓ about 42% vs 19%</td></tr>
-    <tr><td>Titanic<br><span class="small">891 passengers</span></td><td>Sex matters most</td><td>Women 74.2% survived, men 18.9%</td><td class="ok">✓ about 74% vs 19%</td></tr>
-    <tr><td></td><td>Class</td><td>63.0% / 47.3% / 24.2%</td><td class="ok">✓ about 63% / 47% / 24%</td></tr>
-    <tr><td>Mobile money fraud<br><span class="small">PaySim, 200,000-row random sample</span></td><td>Where fraud happens</td><td>Only in transfers (0.7%) and cash-outs (0.2%)</td><td class="ok">✓ only these two types</td></tr>
-    <tr><td></td><td>Fraud amounts</td><td>Much larger (median 401,192 vs 73,996); capped at exactly 10,000,000</td><td class="ok">✓ the simulator's cap</td></tr>
-  </table>
-  <div class="grid2" style="margin-top:18px">
-    <div class="card"><h3>The context steers the method</h3><p>The fraud dataset's notes say the balances of fraudulent transactions were annulled. With no explicit exclusion in the brief, the pipeline read this from the dataset's description and excluded the four balance columns, which would otherwise have given the answer away. It also set aside the existing fraud flag, which fires on only 1 in 200,000 rows.</p></div>
-    <div class="card"><h3>Known limits</h3><p>Associations, not causes. Validated so far on three well-known datasets the AI may have seen before. It analyses the columns it is given and does not create new ones (such as hour of day). A working prototype: local, single user, files only.</p></div>
-  </div>
-</section>
-
-<section id="about">
-  <div class="h2"><span class="num">07</span><h2>About me</h2><span class="rule"></span></div>
-  <!-- ABOUT ME: replace the placeholder below with 3-4 lines in your own words, your photo and your links. -->
-  <div class="placeholder">
-    <p><b>[Your name]</b></p>
-    <p>[3–4 lines about you: who you are, why you built this, what you are looking for.]</p>
-    <p>[Contact: e-mail · LinkedIn · CV]</p>
   </div>
 </section>
 
