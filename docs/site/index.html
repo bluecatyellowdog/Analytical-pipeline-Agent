@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auditable AI Data Analysis</title>
+<meta name="description" content="An AI pipeline that turns a raw dataset and a business question into a finished, checked analysis. The machine does the coding; people keep the judgment.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --navy: #16294d; --ink: #1d2a44; --muted: #5b6678; --line: #dfe4ea; --soft: #f4f6f9;
+    --green: #2e7d4f; --green-bg: #e9f4ec; --green-line: #b9dcc4;
+    --blue: #2f5fb3; --blue-bg: #e8eefa; --blue-line: #b7c8ea;
+    --grey: #5b6678; --grey-bg: #eef0f3; --grey-line: #cfd5dd;
+    --orange: #c36a00; --orange-bg: #fdf3e3; --orange-line: #f0cf9b;
+    --red: #b42318;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: #fff; color: var(--ink); font: 16px/1.55 Inter, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  .topbar { height: 10px; background: var(--navy); }
+  main { max-width: 1040px; margin: 0 auto; padding: 0 16px 80px; }
+  a { color: var(--blue); }
+  nav.toc { position: sticky; top: 0; z-index: 5; background: rgba(255,255,255,.94); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
+  nav.toc div { max-width: 1040px; margin: 0 auto; padding: 10px 16px; display: flex; gap: 18px; overflow-x: auto; white-space: nowrap; font-size: 14px; font-weight: 600; }
+  nav.toc a { color: var(--muted); text-decoration: none; }
+  nav.toc a:hover { color: var(--navy); }
+
+  .eyebrow { margin: 44px 0 6px; font-size: 13px; font-weight: 700; letter-spacing: .12em; color: var(--blue); text-transform: uppercase; }
+  h1 { margin: 0 0 14px; font-size: clamp(32px, 5vw, 46px); line-height: 1.1; letter-spacing: -.02em; color: var(--navy); font-weight: 800; }
+  .lead { font-size: 19px; max-width: 860px; margin: 0 0 18px; }
+  .quote { border-left: 5px solid var(--navy); background: var(--soft); padding: 14px 18px; font-weight: 600; font-size: 18px; margin: 0 0 20px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+  .btn { display: inline-block; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 15px; text-decoration: none; border: 1px solid var(--navy); }
+  .btn.primary { background: var(--navy); color: #fff; }
+  .btn.ghost { color: var(--navy); background: #fff; }
+
+  section { scroll-margin-top: 60px; }
+  .h2 { display: flex; align-items: center; gap: 12px; margin: 56px 0 18px; }
+  .h2 .num { background: var(--navy); color: #fff; font-weight: 700; font-size: 13px; padding: 3px 8px; border-radius: 4px; }
+  .h2 h2 { margin: 0; font-size: 24px; color: var(--navy); letter-spacing: -.01em; }
+  .h2 .rule { flex: 1; height: 1px; background: var(--line); }
+  h3 { margin: 0 0 4px; font-size: 18px; color: var(--navy); }
+  p { margin: 0 0 12px; }
+  .small { font-size: 14px; color: var(--muted); }
+
+  /* 01 three steps */
+  .steps { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 10px; align-items: stretch; }
+  .step { border-radius: 12px; padding: 18px; }
+  .step.you { background: var(--green-bg); } .step.ai { background: var(--blue-bg); } .step.get { background: var(--soft); }
+  .step .label { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .step.you .label { color: var(--green); } .step.ai .label { color: var(--blue); } .step.get .label { color: var(--muted); }
+  .step h3 { margin: 4px 0 12px; }
+  .item { display: flex; gap: 10px; background: #fff; border-radius: 8px; padding: 10px 12px; margin-top: 8px; }
+  .item svg { flex: none; width: 20px; height: 20px; margin-top: 2px; }
+  .item b { display: block; font-size: 15px; color: var(--navy); }
+  .item span { font-size: 14px; color: var(--muted); line-height: 1.4; }
+  .arrow { align-self: center; color: var(--navy); font-size: 22px; }
+  .loop { margin: 14px 0 0; text-align: center; color: var(--green); font-weight: 600; }
+
+  /* cards */
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 16px; background: #fff; }
+  .card.top { border-top: 4px solid var(--navy); }
+  .card .head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+  .card .head svg { flex: none; width: 24px; height: 24px; }
+  .card .head b { font-size: 16px; color: var(--navy); line-height: 1.3; }
+  .card p { font-size: 15px; color: var(--muted); margin: 0; }
+  .layer { border-left: 5px solid var(--navy); background: var(--soft); border-radius: 0 10px 10px 0; padding: 16px; }
+  .layer.l2 { border-color: var(--blue); } .layer.l3 { border-color: var(--grey); }
+  .layer .tag { font-size: 12px; font-weight: 700; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
+  .layer h3 { margin: 4px 0 6px; }
+  .layer p { font-size: 15px; }
+
+  /* 04 architecture */
+  .roles .card { border: none; border-radius: 10px; padding: 16px 18px; }
+  .roles .ai { background: var(--blue-bg); } .roles .code { background: var(--grey-bg); } .roles .gate { background: var(--orange-bg); }
+  .roles b { font-size: 17px; } .roles .ai b { color: var(--blue); } .roles .gate b { color: var(--orange); } .roles .code b { color: var(--navy); }
+  .stage { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px 12px; margin-top: 16px; }
+  .stage-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin-bottom: 14px; }
+  .stage-head b { color: var(--navy); font-size: 16px; } .stage-head span { color: var(--muted); }
+  .flow { display: flex; align-items: flex-start; gap: 4px; }
+  .node { flex: 1 1 0; min-width: 0; text-align: center; }
+  .box { border: 1.5px solid; border-radius: 8px; padding: 9px 4px; font-weight: 700; color: var(--navy); font-size: 15px; line-height: 1.2; min-height: 56px; display: flex; flex-direction: column; justify-content: center; }
+  .box small { display: block; font-size: 11px; font-weight: 600; letter-spacing: .08em; margin-top: 3px; }
+  .box.you { background: var(--green-bg); border-color: var(--green-line); color: var(--green); }
+  .box.ai { background: var(--blue-bg); border-color: var(--blue-line); } .box.ai small { color: var(--blue); }
+  .box.code { background: var(--grey-bg); border-color: var(--grey-line); } .box.code small { color: var(--muted); }
+  .diamond { width: 42px; height: 42px; margin: 7px auto; transform: rotate(45deg); border: 1.5px solid var(--orange); background: var(--orange-bg); display: grid; place-items: center; }
+  .diamond span { transform: rotate(-45deg); font-weight: 800; color: var(--orange); }
+  .node .cap { font-size: 13px; color: var(--muted); margin-top: 7px; line-height: 1.35; }
+  .node.gate .cap { color: var(--orange); font-weight: 600; }
+  .flow .to { flex: none; color: #9aa4b2; padding-top: 18px; font-size: 16px; }
+  .loopnote { margin: 12px auto 0; width: fit-content; border: 1px dashed var(--blue-line); border-radius: 6px; padding: 3px 10px; font-size: 13px; color: var(--blue); }
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid; vertical-align: -2px; margin-right: 6px; }
+  .checkpoint { background: var(--orange-bg); border: 1px solid var(--orange-line); border-radius: 10px; padding: 16px; }
+  .checkpoint .tag { color: var(--orange); font-size: 12px; font-weight: 700; letter-spacing: .1em; }
+  .checkpoint b { display: block; font-size: 17px; color: var(--navy); margin: 4px 0 6px; line-height: 1.3; }
+  .checkpoint p { font-size: 15px; color: var(--muted); margin: 0; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--blue); font-size: 14px; font-weight: 600; }
+  details ul { margin: 8px 0 0; padding-left: 18px; font-size: 14px; color: var(--muted); }
+  .outcomes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+  .outcomes div { background: var(--soft); border-radius: 8px; padding: 10px 14px; font-size: 14px; color: var(--muted); }
+  .outcomes b { margin-right: 4px; } .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; vertical-align: -1px; }
+  .dark { background: var(--navy); color: #fff; border-radius: 10px; padding: 20px; }
+  .dark h3 { color: #fff; } .dark p { color: #dbe2ee; }
+  .light-green { background: var(--green-bg); border-radius: 10px; padding: 20px; }
+  .light-green h3 { color: var(--green); }
+
+  /* 05 monitoring chart */
+  .chart { border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .chart-title { font-weight: 700; color: var(--navy); margin-bottom: 2px; }
+  .bars { margin-top: 12px; }
+  .bar-row { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 10px; padding: 5px 0; position: relative; outline: none; }
+  .bar-row .name { font-size: 14px; color: var(--ink); }
+  .track { display: flex; align-items: center; gap: 8px; }
+  .bar { height: 16px; background: var(--blue); border-radius: 0 4px 4px 0; }
+  .bar-row .val { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .bar-row:hover .bar, .bar-row:focus .bar { background: #244c94; }
+  .tip { display: none; position: absolute; left: 106px; top: -34px; background: var(--navy); color: #fff; font-size: 13px; padding: 5px 9px; border-radius: 6px; white-space: nowrap; z-index: 2; }
+  .bar-row:hover .tip, .bar-row:focus .tip { display: block; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+
+  /* 06 results */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--navy); color: #fff; border-radius: 12px; overflow: hidden; }
+  .stats div { padding: 18px; border-right: 1px solid rgba(255,255,255,.18); }
+  .stats div:last-child { border-right: none; }
+  .stats b { display: block; font-size: 28px; letter-spacing: -.01em; }
+  .stats span { font-size: 14px; color: #d4dcea; }
+  .ok { color: var(--green); font-weight: 700; }
+  .placeholder { border: 2px dashed var(--grey-line); border-radius: 12px; padding: 22px; color: var(--muted); background: #fafbfc; }
+  footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 22px; }
+
+  @media (max-width: 860px) {
+    .steps { grid-template-columns: 1fr; } .arrow { transform: rotate(90deg); justify-self: center; }
+    .grid4 { grid-template-columns: repeat(2, 1fr); } .grid3, .grid2, .outcomes { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: repeat(2, 1fr); } .stats div:nth-child(2) { border-right: none; }
+    .flow { flex-direction: column; align-items: stretch; gap: 0; }
+    .node { display: grid; grid-template-columns: 150px 1fr; gap: 12px; align-items: center; text-align: left; }
+    .node .cap { margin: 0; } .node.gate .diamond { margin: 8px auto; }
+    .flow .to { display: none; }
+    .node:not(:last-child)::after { content: "↓"; grid-column: 1; text-align: center; color: #9aa4b2; line-height: 1; padding: 4px 0; }
+  }
+  @media (max-width: 520px) { .grid4, .stats { grid-template-columns: 1fr; } .stats div { border-right: none; border-bottom: 1px solid rgba(255,255,255,.18); } .node { grid-template-columns: 120px 1fr; } }
+</style>
+</head>
+<body>
+<div class="topbar"></div>
+<nav class="toc" aria-label="Sections"><div>
+  <a href="#how">How it works</a><a href="#trust">Why trust it</a><a href="#get">What you get</a>
+  <a href="#architecture">Architecture</a><a href="#monitoring">Monitoring</a><a href="#results">Results</a><a href="#about">About</a>
+</div></nav>
+<main>
+
+<header>
+  <p class="eyebrow">Project overview</p>
+  <h1>Auditable AI Data Analysis</h1>
+  <p class="lead">An AI pipeline that turns <b>a raw dataset and a business question</b> into <b>a finished, checked analysis</b>, with no code written by the user. Every number is calculated by code, every step is checked automatically, and every judgment call is explained so a person can review it and change it.</p>
+  <p class="quote">The machine does the coding. People keep the judgment.</p>
+  <div class="buttons">
+    <a class="btn primary" href="demo/REPORT.html">See a live report</a>
+    <a class="btn ghost" href="https://github.com/bluecatyellowdog/Analytical-pipeline-Agent">Code on GitHub</a>
+    <a class="btn ghost" href="downloads/technical_architecture.pdf">Technical architecture (PDF)</a>
+  </div>
+</header>
+
+<section id="how">
+  <div class="h2"><span class="num">01</span><h2>How it works: three steps</h2><span class="rule"></span></div>
+  <div class="steps">
+    <div class="step you">
+      <div class="label">1 · You describe</div><h3>A short brief</h3>
+      <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="#2e7d4f" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6M12 17h.01"/></svg><div><b>The question</b><span>What you want to know</span></div></div>
+      <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="#2e7d4f" stroke-width="2"><path d="M4 5h16v11H8l-4 4z"/></svg><div><b>The context</b><span>Where the data comes from; steers every choice</span></div></div>
+      <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="#2e7d4f" stroke-width="2"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg><div><b>The dataset</b><span>CSV, Excel, Parquet or JSON</span></div></div>
+    </div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="step ai">
+      <div class="label">2 · The AI team works</div><h3>Clean, then analyse</h3>
+      <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="#2f5fb3" stroke-width="2"><path d="M4 20l9-9M14 4l6 6-3 3-6-6z"/></svg><div><b>Clean the data</b><span>AI finds and fixes problems; a second AI reviews</span></div></div>
+      <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="#2f5fb3" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M16 16l4 4M8 12l2 2 4-5"/></svg><div><b>Analyse</b><span>AI plans and interprets; code calculates</span></div></div>
+      <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="#c36a00" stroke-width="2"><path d="M12 3l9 9-9 9-9-9z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><div><b>Checked four times</b><span>Automatic checkpoints between the stages</span></div></div>
+    </div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="step get">
+      <div class="label">3 · You receive</div><h3>A checked result</h3>
+      <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="#1d2a44" stroke-width="2"><path d="M4 20h16M7 16V9M12 16V5M17 16v-4"/></svg><div><b>The answer</b><span>Up to four findings, each with a chart</span></div></div>
+      <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="#1d2a44" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg><div><b>Data quality</b><span>What was wrong, what was fixed</span></div></div>
+      <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="#1d2a44" stroke-width="2"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg><div><b>Every decision</b><span>Reasons shown, reversible</span></div></div>
+    </div>
+  </div>
+  <p class="loop">↻ Disagree with a decision? Write your choice into the brief and run again. Your expertise corrects the machine.</p>
+</section>
+
+<section id="trust">
+  <div class="h2"><span class="num">02</span><h2>Why the result can be trusted</h2><span class="rule"></span></div>
+  <div class="grid4">
+    <div class="card top"><div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="#16294d" stroke-width="2"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h2M12 11h2M8 15h2M12 15h2M16 11v4"/></svg><b>Code calculates every number</b></div>
+      <p>The AI decides what to look at; tested code produces every figure. The AI never calculates a number: every figure it writes is traced to a tool result.</p></div>
+    <div class="card top"><div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="#c36a00" stroke-width="2"><path d="M12 3l9 9-9 9-9-9z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><b>Four automatic checkpoints</b></div>
+      <p>Work only moves forward if it passes. Problems are flagged for a person, or the run stops and says why.</p></div>
+    <div class="card top"><div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="#16294d" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M16 16l4 4"/></svg><b>Every decision is visible</b></div>
+      <p>Each judgment call shows the options, the choice, the reasoning and the AI's confidence.</p></div>
+    <div class="card top"><div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="#2e7d4f" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><b>People stay in control</b></div>
+      <p>Uncertain choices are marked for review, and any decision can be overruled and the analysis re-run.</p></div>
+  </div>
+</section>
+
+<section id="get">
+  <div class="h2"><span class="num">03</span><h2>What you get: one answer, with more depth on demand</h2><span class="rule"></span></div>
+  <div class="grid3">
+    <div class="layer"><div class="tag">Layer 1 · The report</div><h3>The answer in plain words</h3>
+      <p>Up to four findings with charts, suggested actions, and a green / yellow / red rating of how far to trust it.</p>
+      <p class="small">For decision makers · HTML or PDF · <a href="demo/REPORT.html">open a live example</a></p></div>
+    <div class="layer l2"><div class="tag">Layer 2 · The details</div><h3>The full reasoning</h3>
+      <p>All charts and results, every data problem and fix, every decision with its effect, and a cost overview.</p>
+      <p class="small">For analysts and reviewers · e.g. <a href="demo/details/3_decisions.pdf">the decisions</a></p></div>
+    <div class="layer l3"><div class="tag">Layer 3 · The audit trail</div><h3>The evidence</h3>
+      <p>The cleaned data, removed rows with the reason, and a complete log of every step and every AI attempt.</p>
+      <p class="small">For audit and reuse</p></div>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="h2"><span class="num">04</span><h2>Architecture</h2><span class="rule"></span></div>
+  <p class="lead" style="font-weight:600;color:var(--navy)">Like a well-run analysis team: AI specialists make the judgment calls, code does the arithmetic, and checkpoints sign off each stage.</p>
+  <div class="grid3 roles">
+    <div class="card ai"><b>5 AI specialists · decide</b><p>Each has one job: find problems, fix them, review the fix, plan the analysis, interpret the results.</p></div>
+    <div class="card code"><b>Code · computes</b><p>Reads the data and calculates every number with tested tools. Same input, same answer.</p></div>
+    <div class="card gate"><b>4 checkpoints · approve</b><p>Automatic, rule-based inspections between stages. Nothing moves on without passing.</p></div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-head"><div><b>Stage 1 · Cleaning</b> <span>Make the data fit to use</span></div><span class="small">Output: clean data + a record of every change</span></div>
+    <div class="flow">
+      <div class="node"><div class="box you">Brief + data<small>YOU</small></div><div class="cap">Question, context and file</div></div><span class="to">→</span>
+      <div class="node"><div class="box code">Read &amp; profile<small>CODE</small></div><div class="cap">Reads the file and describes every column</div></div><span class="to">→</span>
+      <div class="node gate"><div class="diamond"><span>1</span></div><div class="cap">File read correctly?</div></div><span class="to">→</span>
+      <div class="node"><div class="box ai">Diagnostic<small>AI</small></div><div class="cap">Finds problems, makes the judgment calls</div></div><span class="to">→</span>
+      <div class="node"><div class="box ai">Coder<small>AI</small></div><div class="cap">Writes and runs the fixes in a safe sandbox</div></div><span class="to">⇄</span>
+      <div class="node"><div class="box ai">Reviewer<small>AI</small></div><div class="cap">Checks the work independently</div></div><span class="to">→</span>
+      <div class="node gate"><div class="diamond"><span>2</span></div><div class="cap">Clean data safe?</div></div>
+    </div>
+    <div class="loopnote">⇄ Reviewer can send the work back to the coder, at most twice</div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-head"><div><b>Stage 2 · Analysis</b> <span>Answer the question</span></div><span class="small">Output: the report</span></div>
+    <div class="flow">
+      <div class="node"><div class="box code">Clean data<small>FROM STAGE 1</small></div><div class="cap">With a record of what was done</div></div><span class="to">→</span>
+      <div class="node"><div class="box ai">Planner<small>AI</small></div><div class="cap">Turns the goal into concrete questions</div></div><span class="to">→</span>
+      <div class="node gate"><div class="diamond"><span>3</span></div><div class="cap">Plan feasible?</div></div><span class="to">→</span>
+      <div class="node"><div class="box ai">Analyst<small>AI</small></div><div class="cap">Chooses methods, reads results, writes findings</div></div><span class="to">⇄</span>
+      <div class="node"><div class="box code">11 tools<small>CODE</small></div><div class="cap">Summaries, groups, trends, regressions</div></div><span class="to">→</span>
+      <div class="node gate"><div class="diamond"><span>4</span></div><div class="cap">Write-up backed by evidence?</div></div><span class="to">→</span>
+      <div class="node"><div class="box you">Report<small>TO YOU</small></div><div class="cap">PDF + HTML</div></div>
+    </div>
+    <div class="loopnote">⇄ Analyst asks the tools for numbers, up to three rounds</div>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--green-bg);border-color:var(--green-line)"></i>You</span>
+    <span><i style="background:var(--blue-bg);border-color:var(--blue-line)"></i>AI specialist (decides)</span>
+    <span><i style="background:var(--grey-bg);border-color:var(--grey-line)"></i>Code (computes)</span>
+    <span><i style="background:var(--orange-bg);border-color:var(--orange);transform:rotate(45deg)"></i>Checkpoint (approves)</span>
+  </div>
+
+  <h3 style="margin-top:34px">The four checkpoints: what each one protects against</h3>
+  <div class="grid4" style="margin-top:12px">
+    <div class="checkpoint"><div class="tag">◆ CHECKPOINT 1</div><b>Was the file read completely and correctly?</b>
+      <p>Counts every row, catches broken lines and wrong encoding. Stops a bad file before any AI cost.</p>
+      <details><summary>What it checks</summary><ul><li>Lines in the file = rows loaded + rows rejected</li><li>Rejected lines: flag above 0.1%, block above 1%</li><li>Unique column names; file hashes recorded</li><li>Every column has a type, or a reason why not</li><li>Statements in the brief hold in the data</li></ul></details></div>
+    <div class="checkpoint"><div class="tag">◆ CHECKPOINT 2</div><b>Is the cleaned data safe to analyse?</b>
+      <p>No rows lost or values blanked without explanation; re-running the fixes gives the same result.</p>
+      <details><summary>What it checks</summary><ul><li>Types and columns match the diagnosis</li><li>Every changed cell and removed row is accounted for, with a reason</li><li>Untouched columns are identical to the raw data</li><li>Row loss: flag above 5%, block above 20%</li><li>The target is never filled in; replaying the log reproduces the result</li></ul></details></div>
+    <div class="checkpoint"><div class="tag">◆ CHECKPOINT 3</div><b>Can the analysis plan actually run?</b>
+      <p>The columns exist, the methods can run on this data, and excluded data is not used.</p>
+      <details><summary>What it checks</summary><ul><li>Every column exists; every method is a tested tool</li><li>The target is the brief's; IDs, personal data and excluded columns are not analysed</li><li>A column that gives the answer away is excluded</li><li>Enough rows for each question, or it is marked not possible</li></ul></details></div>
+    <div class="checkpoint"><div class="tag">◆ CHECKPOINT 4</div><b>Is every claim backed by a calculation?</b>
+      <p>Each number in the text is traced to a tool result; no overclaiming. Only checked text reaches the report.</p>
+      <details><summary>What it checks</summary><ul><li>Every question in the plan is answered</li><li>Every finding cites tool results that ran</li><li>Every number matches a logged result; a number the AI worked out itself is rejected</li><li>A finding without real evidence cannot be called strong</li></ul></details></div>
+  </div>
+  <div class="outcomes">
+    <div><span class="dot" style="background:var(--green)"></span><b style="color:var(--green)">PASS</b> all good, continue</div>
+    <div><span class="dot" style="background:var(--orange)"></span><b style="color:var(--orange)">FLAG</b> continue, shown for review</div>
+    <div><span class="dot" style="background:var(--red)"></span><b style="color:var(--red)">BLOCK</b> stop, and explain why</div>
+  </div>
+  <div class="grid2" style="margin-top:18px">
+    <div class="dark"><h3>Why this design matters</h3><p>AI is good at judgment but can make up numbers. Here the two are separated: the AI never calculates a figure, and code never makes a judgment call. Each hand-over between stages follows a fixed format, so the checkpoints can verify it mechanically.</p></div>
+    <div class="light-green"><h3>Where the person comes in</h3><p>Every judgment call is written to an editable decision list (decisions.yaml), and the analysis plan can be edited too. Change a choice, or write it into the brief, and run again. The machine redoes the work; your call is the one that counts.</p></div>
+  </div>
+</section>
+
+<section id="monitoring">
+  <div class="h2"><span class="num">05</span><h2>Monitoring every AI call</h2><span class="rule"></span></div>
+  <p>Each run folder is the audit trail of one analysis. On top of that, every AI call can be traced in <b>Langfuse</b>: which specialist made it, with which model, what it was sent and answered, the tokens, the cost and the time. That shows where money and time go, and what changed after a model or prompt was swapped. Tracing is optional and can never stop a run.</p>
+  <div class="grid2">
+    <figure class="chart" style="margin:0">
+      <div class="chart-title">Where the cost of one analysis goes</div>
+      <div class="small">Fraud run, total $0.87 · Analyst and Diagnostic on Claude Opus, the others on Claude Sonnet</div>
+      <div class="bars" role="list">
+        <div class="bar-row" role="listitem" tabindex="0"><span class="name">Analyst</span><div class="track"><div class="bar" style="width:65%"></div><span class="val">$0.57 · 65%</span></div><span class="tip">Analyst: $0.565 · 5 calls · 113 s</span></div>
+        <div class="bar-row" role="listitem" tabindex="0"><span class="name">Diagnostic</span><div class="track"><div class="bar" style="width:15%"></div><span class="val">$0.13 · 15%</span></div><span class="tip">Diagnostic: $0.126 · 1 call · 39 s</span></div>
+        <div class="bar-row" role="listitem" tabindex="0"><span class="name">Reviewer</span><div class="track"><div class="bar" style="width:12%"></div><span class="val">$0.10 · 12%</span></div><span class="tip">Reviewer: $0.100 · 2 calls · 23 s</span></div>
+        <div class="bar-row" role="listitem" tabindex="0"><span class="name">Planner</span><div class="track"><div class="bar" style="width:5%"></div><span class="val">$0.04 · 5%</span></div><span class="tip">Planner: $0.041 · 1 call · 20 s</span></div>
+        <div class="bar-row" role="listitem" tabindex="0"><span class="name">Coder</span><div class="track"><div class="bar" style="width:4%"></div><span class="val">$0.03 · 4%</span></div><span class="tip">Coder: $0.034 · 1 call · 9 s</span></div>
+      </div>
+      <details><summary>Show as a table</summary>
+        <table><tr><th>Specialist</th><th>Calls</th><th>Cost</th><th>Share</th><th>Time</th></tr>
+          <tr><td>Analyst</td><td>5</td><td>$0.565</td><td>65%</td><td>113 s</td></tr>
+          <tr><td>Diagnostic</td><td>1</td><td>$0.126</td><td>15%</td><td>39 s</td></tr>
+          <tr><td>Reviewer</td><td>2</td><td>$0.100</td><td>12%</td><td>23 s</td></tr>
+          <tr><td>Planner</td><td>1</td><td>$0.041</td><td>5%</td><td>20 s</td></tr>
+          <tr><td>Coder</td><td>1</td><td>$0.034</td><td>4%</td><td>9 s</td></tr></table>
+      </details>
+    </figure>
+    <div>
+      <h3>What it shows, and what it is for</h3>
+      <ul style="padding-left:18px;margin:6px 0 0">
+        <li><b>Cost control:</b> the analyst is two thirds of the cost, because each round of tool calls re-sends the earlier results. That is the first place to save.</li>
+        <li><b>Model choice:</b> each specialist has its own model. On the cheaper model, the coder, reviewer and planner cost about half of what they did in an earlier all-Opus run (on a different dataset, so a first indication, not a measurement).</li>
+        <li><b>Debugging:</b> the exact prompt and reply behind a weak finding or a blocked checkpoint.</li>
+        <li><b>Next:</b> attach checkpoint outcomes as scores, so quality and cost sit side by side.</li>
+      </ul>
+      <p class="small" style="margin-top:12px">Only what the AI is sent is traced: column names, summaries and the brief, never the rows.</p>
+    </div>
+  </div>
+</section>
+
+<section id="results">
+  <div class="h2"><span class="num">06</span><h2>First results</h2><span class="rule"></span></div>
+  <div class="stats">
+    <div><b>3 datasets</b><span>Telco churn, Titanic and mobile money fraud: results in line with human analysts</span></div>
+    <div><b>3 of 3</b><span>runs passed all four checkpoints (one with a flag shown for review)</span></div>
+    <div><b>$0.84–1.27</b><span>AI cost per analysis</span></div>
+    <div><b>3–5 min</b><span>of AI time per run</span></div>
+  </div>
+  <p class="small" style="margin-top:10px">Early, informal validation on well-known public datasets; a systematic test against known answers is the next step.</p>
+  <table style="margin-top:14px">
+    <tr><th>Dataset</th><th>Finding</th><th>Pipeline</th><th>Common in public analyses</th></tr>
+    <tr><td>Telco churn<br><span class="small">7,043 customers</span></td><td>Contract type matters most</td><td>Churn 42.7% / 11.3% / 2.8% (month-to-month / 1 year / 2 years)</td><td class="ok">✓ about 43% / 11% / 3%</td></tr>
+    <tr><td></td><td>Fiber optic vs DSL</td><td>41.9% vs 19.0%</td><td class="ok">✓ about 42% vs 19%</td></tr>
+    <tr><td>Titanic<br><span class="small">891 passengers</span></td><td>Sex matters most</td><td>Women 74.2% survived, men 18.9%</td><td class="ok">✓ about 74% vs 19%</td></tr>
+    <tr><td></td><td>Class</td><td>63.0% / 47.3% / 24.2%</td><td class="ok">✓ about 63% / 47% / 24%</td></tr>
+    <tr><td>Mobile money fraud<br><span class="small">PaySim, 200,000-row random sample</span></td><td>Where fraud happens</td><td>Only in transfers (0.7%) and cash-outs (0.2%)</td><td class="ok">✓ only these two types</td></tr>
+    <tr><td></td><td>Fraud amounts</td><td>Much larger (median 401,192 vs 73,996); capped at exactly 10,000,000</td><td class="ok">✓ the simulator's cap</td></tr>
+  </table>
+  <div class="grid2" style="margin-top:18px">
+    <div class="card"><h3>The context steers the method</h3><p>The fraud dataset's notes say the balances of fraudulent transactions were annulled. With no explicit exclusion in the brief, the pipeline read this from the dataset's description and excluded the four balance columns, which would otherwise have given the answer away. It also set aside the existing fraud flag, which fires on only 1 in 200,000 rows.</p></div>
+    <div class="card"><h3>Known limits</h3><p>Associations, not causes. Validated so far on three well-known datasets the AI may have seen before. It analyses the columns it is given and does not create new ones (such as hour of day). A working prototype: local, single user, files only.</p></div>
+  </div>
+</section>
+
+<section id="about">
+  <div class="h2"><span class="num">07</span><h2>About me</h2><span class="rule"></span></div>
+  <!-- ABOUT ME: replace the placeholder below with 3-4 lines in your own words, your photo and your links. -->
+  <div class="placeholder">
+    <p><b>[Your name]</b></p>
+    <p>[3–4 lines about you: who you are, why you built this, what you are looking for.]</p>
+    <p>[Contact: e-mail · LinkedIn · CV]</p>
+  </div>
+</section>
+
+<footer>
+  <span>Auditable AI Data Analysis</span>
+  <a href="https://github.com/bluecatyellowdog/Analytical-pipeline-Agent">Code on GitHub</a>
+  <a href="demo/REPORT.html">Live example report</a>
+  <a href="downloads/technical_architecture.pdf">Technical architecture (PDF)</a>
+</footer>
+</main>
+</body>
+</html>
