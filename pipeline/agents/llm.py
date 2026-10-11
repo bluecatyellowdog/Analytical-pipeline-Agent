@@ -26,6 +26,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
+from pipeline.agents import tracing as tracing_
 from pipeline.contracts.settings import (
     AGENTS,
     AgentName,
@@ -204,10 +205,31 @@ def model_for(agent: AgentName, settings: Settings, env: Mapping[str, str]) -> s
     return settings.models.default
 
 
+class TracedClient:
+    """A client whose every call is recorded by the active tracing, under its agent's name."""
+
+    def __init__(self, inner: LLMClient, agent: str, tracing: tracing_.Tracing) -> None:
+        self.inner = inner
+        self.agent = agent
+        self.tracing = tracing
+
+    @property
+    def config(self) -> LLMConfig:
+        return self.inner.config  # type: ignore[attr-defined]
+
+    def complete(self, messages: Sequence[Message]) -> LLMResponse:
+        return self.tracing.call(
+            self.agent, self.config.model, messages, lambda: self.inner.complete(messages)
+        )
+
+
 def connect_agents(
-    env: Mapping[str, str] | None = None, settings: Settings | None = None
+    env: Mapping[str, str] | None = None,
+    settings: Settings | None = None,
+    tracing: tracing_.Tracing | None = None,
 ) -> dict[AgentName, OpenAICompatibleClient]:
-    """One client per agent, each on the model settings.yaml gives it."""
+    """One client per agent, each on the model settings.yaml gives it, traced when Langfuse
+    is switched on in .env (or when `tracing` is given)."""
     if env is None:
         from dotenv import load_dotenv
 
@@ -225,6 +247,9 @@ def connect_agents(
         if model not in by_model:
             by_model[model] = connect(env, model=model)
         clients[agent] = by_model[model]
+    active = tracing_.start_tracing(env, tracing)
+    if active.enabled:
+        return {agent: TracedClient(client, agent, active) for agent, client in clients.items()}
     return clients
 
 
@@ -249,7 +274,7 @@ def public_info(client: LLMClient, fallback: dict[str, str] | None = None) -> di
 
 def main() -> int:
     try:
-        clients = connect_agents()
+        clients = connect_agents(tracing=tracing_.Tracing())  # the test calls are not traced
     except LLMConfigError as error:
         print(f"Not configured: {error}")
         return 1
@@ -282,6 +307,7 @@ def main() -> int:
         )
         return 1
     print("\nThe key works, and every model answers.")
+    print(tracing_.check(tracing_.tracing_from_env(os.environ)))
     return 0
 
 

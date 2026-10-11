@@ -20,6 +20,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from pipeline.agents import tracing
 from pipeline.agents.common import (
     MAX_RETRIES,
     Attempt,
@@ -366,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"Asking {client.config.model} for a diagnosis...")
+    print(tracing.announce(run_dir.name, "diagnose"))
     try:
         result = run_on_folder(run_dir, client, client.config.public())
     except DiagnosisError as error:

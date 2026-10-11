@@ -190,6 +190,16 @@ The agents are `diagnostic`, `coder`, `reviewer`, `planner` and `analysis`. A ru
 | `LLM_BASE_URL` | Optional. Any other OpenAI-compatible endpoint, e.g. a local Ollama server. |
 | `LLM_MODEL` | Optional. Used only when settings.yaml names no model for an agent. Defaults exist for OpenRouter and Anthropic keys. |
 
+**Tracing (optional).** With [Langfuse](https://langfuse.com) keys in `.env`, every AI call is also recorded in Langfuse: one trace per command, named after its run folder, and one entry per call, named after its agent, with the model, prompt, reply, tokens and cost. Without the keys nothing changes.
+
+| Setting | Use |
+| --- | --- |
+| `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | Both needed to switch tracing on. From Langfuse: project Settings, API Keys. |
+| `LANGFUSE_HOST` | `https://cloud.langfuse.com` (EU), or your own Langfuse server. |
+| `LANGFUSE` | `off` pauses tracing without removing the keys. |
+
+A run prints `Tracing: Langfuse on` or `Tracing: off` before it starts, and a link to the trace at the end. `uv run python -m pipeline.agents.llm` also checks that Langfuse accepts the keys. Tracing never stops a run: if Langfuse is down, the run finishes and says so once. What is traced is what the AI is sent (profiles, aggregates and your brief, never rows), so switching it on means that also goes to Langfuse.
+
 Command options:
 
 - `pipeline.ingest`:

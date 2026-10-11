@@ -26,6 +26,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from pipeline.agents import tracing
 from pipeline.agents.common import (
     MAX_RETRIES,
     Attempt,
@@ -365,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     run_dir = Path(args.run_dir)
     print(f"Asking {client.config.model} for an analysis plan...")
+    print(tracing.announce(run_dir.name, "plan"))
     try:
         result = run_on_folder(run_dir, client, client.config.public())
     except AnalysisInputError as error:

@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from pipeline.agents import analysis, planner
+from pipeline.agents import analysis, planner, tracing
 from pipeline.agents.llm import (
     LLMClient,
     LLMConfigError,
@@ -118,9 +118,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     used = {name: clients[name] for name in ("planner", "analysis")}
     print(f"Analysing {run_dir} ({describe_models(used)}). This takes a minute or two...")
+    print(tracing.announce(run_dir.name, "analyze"))
     summary = analyze_folder(run_dir, clients["analysis"], {}, clients=clients)
     print()
     print(summarise(summary))
+    trace = tracing.finish()
+    if trace:
+        print(trace)
     return 0 if summary.analysis is not None else 1
 
 

@@ -25,6 +25,7 @@ from typing import Any
 
 import yaml
 
+from pipeline.agents import tracing
 from pipeline.agents.coder import CoderError, CoderResult, rerun, write_and_run
 from pipeline.agents.coder import prompt_version as coder_prompt_version
 from pipeline.agents.common import (
@@ -930,6 +931,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     reviewing = not args.no_review
+    print(tracing.announce(run_dir.name, "clean"))
     print(
         f"Cleaning with {client.config.model}"
         + (f", reviewing with {review_client.config.model}" if reviewing else ", no review")

@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from pipeline import clean
-from pipeline.agents import analysis, diagnostic, planner
+from pipeline.agents import analysis, diagnostic, planner, tracing
 from pipeline.agents.coder import CoderError
 from pipeline.agents.decisions import DecisionsError
 from pipeline.agents.llm import (
@@ -103,6 +103,7 @@ def _run_steps(
     if out is None:
         update_index(ingestion, run_dir, source)
 
+    tracing.label_run(run_dir.name, "run")
     summary = RunSummary(run_dir=run_dir, ingestion=ingestion)
     if ingestion.blocked:
         summary.stopped_at = "ingest"
@@ -311,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Running {source}. This takes a few minutes...")
     print(f"Models: {describe_models(clients)}")
+    print(tracing.current().status())
     try:
         summary = run_all(
             source,
@@ -329,6 +331,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print()
     print(summarise(summary))
+    trace = tracing.finish()
+    if trace:
+        print(trace)
     finished = summary.stopped_at is None
     return 0 if finished and summary.cleaning and not summary.cleaning.result.blocked else 1
 
