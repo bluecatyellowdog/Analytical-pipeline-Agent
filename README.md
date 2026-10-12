@@ -1,6 +1,10 @@
 # Auditable agentic data science pipeline
 
-You give it a data file and a short description of the data and what you want to learn. It loads and checks the file, cleans it with AI agents, and (in later phases) plans and runs the analysis. Every step writes a report saying what was done, why, and what the numbers were before and after, so the result comes with a complete audit trail.
+[![CI](https://github.com/bluecatyellowdog/Analytical-pipeline-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/bluecatyellowdog/Analytical-pipeline-Agent/actions/workflows/ci.yml)
+
+**[Project page](https://bluecatyellowdog.github.io/Analytical-pipeline-Agent/)** · **[Live example report](https://bluecatyellowdog.github.io/Analytical-pipeline-Agent/site/demo/REPORT.html)** · **[Technical architecture (PDF)](docs/site/downloads/technical_architecture.pdf)**
+
+You give it a data file and a short description of the data and what you want to learn. AI agents clean the data and analyse it, while code does every calculation and four automatic gates check every step. The result is a short report in plain words, with every number traced to a logged calculation and every decision about the data shown and reversible. Every step also writes what was done, why, and what the numbers were before and after, so the result comes with a complete audit trail.
 
 Three rules hold throughout:
 
@@ -305,7 +309,7 @@ Rules every tool follows:
 | [pipeline/contracts/](pipeline/contracts/) | The data passed between steps, as validated models. Their validators enforce the audit rules. |
 | [pipeline/ingestion/](pipeline/ingestion/) | Loading, profiling and claim checks |
 | [pipeline/ops/](pipeline/ops/) | 15 library operations, the sandboxed `custom_code` operation, and the plan executor |
-| [pipeline/agents/](pipeline/agents/) | The LLM client and the diagnostic, coder, reviewer, planner and analysis agents, with their prompts |
+| [pipeline/agents/](pipeline/agents/) | The LLM client, optional Langfuse tracing, and the diagnostic, coder, reviewer, planner and analysis agents, with their prompts |
 | [pipeline/checks/](pipeline/checks/) | Gates 1 to 4, the reconciliation checks, the schema contract and the number check |
 | [pipeline/tools/](pipeline/tools/) | The reviewer's query tool, the analysis tools (statistics, charts, regressions), and the loader that prepares the clean data for analysis |
 | [briefs/](briefs/) | Your briefs, one per dataset, and the template |
@@ -316,22 +320,38 @@ Rules every tool follows:
 | [pipeline/ingest.py](pipeline/ingest.py), [pipeline/clean.py](pipeline/clean.py), [pipeline/analyze.py](pipeline/analyze.py) | The commands for steps 2, 5 and 6–7 |
 | [benchmark/](benchmark/) | The benchmark: synthetic clean data, the breakers, scenarios, the scorer and the runner |
 | [tests/fixtures/](tests/fixtures/) | Ten deliberately difficult files, with their expected results in [expected.yaml](tests/fixtures/expected.yaml) |
+| [docs/site/](docs/site/) | The project page published on GitHub Pages, with the live example report (`docs/index.html` forwards to it) |
 
 ## Status
 
 | Phase | State |
 | --- | --- |
-| 0. Contracts and setup | Done, except tracing and the GitHub Pages workflow |
+| 0. Contracts and setup | Done, including optional Langfuse tracing and CI on every push |
 | 1. Deterministic foundation | Done |
-| 2. Cleaning agents | Mostly done: diagnostic agent, coder, Gate 2, reviewer and AI decisions run end to end. Left: canary rows and a run on five public datasets. |
+| 2. Cleaning agents | Done: diagnostic agent, coder, Gate 2, reviewer and AI decisions run end to end. Left: canary rows |
 | 3. Corruption benchmark | In progress: synthetic data, breakers, scorer and runner built; first results in; real messy datasets to come |
 | 4. Analysis planning and your approval | Done: the planner, Gate 3 and automatic approval; edit the plan and run `pipeline.analyze` to change it |
-| 5. Analysis agent | Done: the tools, the agent, Gate 4 and the findings in the PDF. Left: looking inside one subgroup, or crossing two groupings |
-| 6. Evaluation | Not started |
-| 7. App and publishing | Not started |
+| 5. Analysis agent | Done: the tools (including subgroups, two-way tables, ratios and trends), the agent, Gate 4 and the plain report in PDF and HTML |
+| 6. Evaluation | Started: informal validation on three public datasets (below); a scored evaluation set is next |
+| 7. App and publishing | Project page published on GitHub Pages ([link](https://bluecatyellowdog.github.io/Analytical-pipeline-Agent/)); no app yet |
+
+### Validation so far
+
+The whole workflow was run on three well-studied public datasets from Kaggle, and its findings and cleaning decisions compared with what public analyses report:
+
+| Dataset | What the pipeline found | Compared with public analyses |
+| --- | --- | --- |
+| Telco customer churn (7,043 customers) | Contract type matters most: 42.7% / 11.3% / 2.8% churn for month-to-month / one-year / two-year | About 43% / 11% / 3% |
+| Titanic (891 passengers) | Sex and class matter most: women 74.2% survived, men 18.9%; first class 63.0%, third 24.2% | About 74% vs 19%; 63% vs 24% |
+| PaySim mobile money fraud (200,000-row random sample) | Fraud only in transfers and cash-outs; fraud amounts much larger and capped at 10,000,000. It left out the four balance columns because the dataset's own notes warned about them | The same two types; the simulator's known cap |
+
+All three runs passed the four gates (one with a flag shown for review), at $0.84–1.27 and 3–5 minutes of AI time per run. This is informal: the datasets are well known (the AI may have seen analyses of them), each was run once, and the comparison is with common practice, not a scored answer key. More on the [project page](https://bluecatyellowdog.github.io/Analytical-pipeline-Agent/).
 
 ## Next
 
-1. **Five-dataset run:** the whole workflow on five public datasets, to see how the findings hold up on data other than Titanic.
+1. **Evaluation set:** datasets with known answers (planted problems and findings), including unseen and disguised data, scored automatically, with repeated runs to measure stability.
+2. **Ablation:** measure what each agent adds, e.g. whether the reviewer catches what Gate 2 misses, against its cost.
+3. **Scores in Langfuse:** attach gate outcomes to each trace, so quality and cost sit side by side.
+4. **Large files:** a disk-based database for runs, so files with millions of rows fit on an ordinary laptop.
 
-Later: canary rows (test rows with known answers, checked on every run) and real messy datasets for the benchmark.
+Later: canary rows (test rows with known answers, checked on every run), derived time features such as hour of day, and real messy datasets for the benchmark.
